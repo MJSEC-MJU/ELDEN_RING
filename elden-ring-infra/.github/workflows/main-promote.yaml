@@ -1,0 +1,40 @@
+# ============================================================
+# ELDEN RING - Main Branch Sync (GitHub Actions)
+# dev → main 머지 시: Production 기본 이미지 동기화
+# (수동 개발자 코드 변경의 Production 반영만 담당)
+#
+# NOTE: 실제 보안 패치의 Production 승격은
+#       Governance Plane이 자동으로 처리합니다.
+#       이 워크플로우는 인프라/설정 변경 동기화용입니다.
+# ============================================================
+name: Main Sync
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync-infra:
+    name: Sync Infrastructure to Production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+
+      - name: Apply Infrastructure Changes
+        run: |
+          echo "=== Syncing Infrastructure to Production ==="
+          kubectl apply -f kubernetes/base/ --recursive
+          echo "Production infra synced with main branch"
+
+      - name: Verify
+        run: |
+          for ns in elden-production elden-staging elden-canary elden-secure-coding elden-governance elden-monitoring elden-harness; do
+            STATUS=$(kubectl get ns $ns -o jsonpath='{.status.phase}' 2>/dev/null || echo "MISSING")
+            echo "  $ns: $STATUS"
+          done

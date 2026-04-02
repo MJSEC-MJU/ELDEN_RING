@@ -1,0 +1,75 @@
+# ============================================================
+# ELDEN RING - Istio Operator Configuration
+# 서비스 메시: 트래픽 제어, mTLS, 관측성
+# Runtime Defense Plane의 핵심 인프라
+# ============================================================
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: elden-ring-istio
+  namespace: istio-system
+spec:
+  profile: default
+  meshConfig:
+    # 전역 mTLS 활성화
+    enableAutoMtls: true
+    # 접근 로그 활성화 (Loki로 수집)
+    accessLogFile: /dev/stdout
+    accessLogEncoding: JSON
+    # Prometheus 메트릭
+    enablePrometheusMerge: true
+    defaultConfig:
+      # 분산 추적
+      tracing:
+        sampling: 100.0
+      # 메트릭 수집 간격
+      holdApplicationUntilProxyStarts: true
+
+  components:
+    pilot:
+      k8s:
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        hpaSpec:
+          minReplicas: 1
+          maxReplicas: 3
+
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        k8s:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          service:
+            type: LoadBalancer
+          hpaSpec:
+            minReplicas: 1
+            maxReplicas: 3
+
+  values:
+    global:
+      proxy:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+    # Prometheus 연동
+    telemetry:
+      enabled: true
+      v2:
+        enabled: true
+        prometheus:
+          enabled: true

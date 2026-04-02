@@ -1,0 +1,12 @@
+# Harness Kubernetes Cluster Connector
+# Delegate를 통해 클러스터에 접근
+connector:
+  name: elden-ring-k8s-cluster
+  identifier: eldenringk8scluster
+  type: K8sCluster
+  spec:
+    credential:
+      type: InheritFromDelegate
+      spec:
+        delegateSelectors:
+          - elden-ring

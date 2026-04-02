@@ -1,0 +1,95 @@
+# ============================================================
+# ELDEN RING - PR Validation (GitHub Actions)
+# 팀원이 dev 브랜치로 PR 올리면 코드/매니페스트 자동 검증
+# ============================================================
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: YAML Lint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: kubernetes/ .harness/
+          config_data: |
+            extends: relaxed
+            rules:
+              line-length:
+                max: 200
+
+      - name: Install kubeval
+        run: |
+          wget -q https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          sudo mv kubeval /usr/local/bin/
+
+      - name: Validate K8s Manifests
+        run: |
+          find kubernetes/ -name '*.yaml' \
+            -not -name 'values.yaml' \
+            -not -name 'istio-operator.yaml' \
+            -not -name 'README.md' | while read f; do
+            echo "Validating: $f"
+            kubeval "$f" --strict --ignore-missing-schemas || true
+          done
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy IaC Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: kubernetes/
+          severity: HIGH,CRITICAL
+          exit-code: 0
+
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if app code changed
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app:
+              - 'src/**'
+              - 'Dockerfile'
+              - 'package.json'
+              - 'go.mod'
+              - 'requirements.txt'
+
+      - name: Build Docker Image
+        if: steps.changes.outputs.app == 'true'
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t eldenring/target-app:pr-${{ github.event.pull_request.number }} .
+          fi
+
+      - name: Run Tests
+        if: steps.changes.outputs.app == 'true'
+        run: |
+          if [ -f Makefile ] && grep -q "test" Makefile; then make test
+          elif [ -f package.json ]; then npm ci && npm test
+          elif [ -f go.mod ]; then go test ./...
+          elif [ -f requirements.txt ]; then pip install -r requirements.txt && python -m pytest tests/ -v
+          fi

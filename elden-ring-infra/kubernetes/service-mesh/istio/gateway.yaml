@@ -1,0 +1,120 @@
+# ============================================================
+# ELDEN RING - Istio Gateway & VirtualService
+# 외부 트래픽 진입점 및 라우팅
+# ============================================================
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: elden-ring-gateway
+  namespace: elden-production
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*.elden-ring.local"
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: elden-ring-tls
+      hosts:
+        - "*.elden-ring.local"
+---
+# Production 서비스 라우팅
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: target-app
+  namespace: elden-production
+spec:
+  hosts:
+    - "app.elden-ring.local"
+  gateways:
+    - elden-ring-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: target-app
+            subset: stable
+            port:
+              number: 8080
+          weight: 100
+      retries:
+        attempts: 3
+        perTryTimeout: 5s
+        retryOn: 5xx,reset,connect-failure
+      timeout: 30s
+---
+# DestinationRule: stable/canary subset 정의
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: target-app
+  namespace: elden-production
+spec:
+  host: target-app
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        h2UpgradePolicy: DEFAULT
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 1000
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary
+---
+# PeerAuthentication: 전역 mTLS STRICT
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-mtls
+  namespace: elden-production
+spec:
+  mtls:
+    mode: STRICT
+---
+# AuthorizationPolicy: 기본 deny-all (Runtime Defense Plane이 세부 정책 관리)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all-default
+  namespace: elden-production
+spec:
+  {}
+---
+# AuthorizationPolicy: 인가된 트래픽만 허용
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-ingress-gateway
+  namespace: elden-production
+spec:
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway"]
+    - from:
+        - source:
+            namespaces: ["elden-governance", "elden-monitoring"]
