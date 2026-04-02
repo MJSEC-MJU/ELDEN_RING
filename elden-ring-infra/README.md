@@ -78,12 +78,12 @@ elden-ring-infra/
 
 | Phase | Namespace | 담당 | 역할 |
 |---|---|---|---|
-| **Phase 1** | `elden-production` | 이종윤 | 위협 탐지, 이벤트 정규화, CWE 매핑, 컨텍스트 생성 |
-| **Phase 2** | `elden-secure-coding` | 이주오 | 정적 분석, LLM 패치 생성, 후보 이미지 빌드 |
-| **Phase 3** | `elden-staging` | 이주오 | 기동/회귀/공격재현/SLO 검증, 통과 이미지 선택 |
-| **Phase 4** | `elden-governance` | 이윤태 | 정책 검증, GitOps 반영, Canary 승격, 롤백 |
-| System | `elden-canary` | 이윤태 | Canary 트래픽 분할 테스트 |
-| System | `elden-monitoring` | 이윤태 | Prometheus, Grafana, Loki, Falco |
+| **Phase 1** | `elden-production` | 이주오 | 위협 탐지, 이벤트 정규화, CWE 매핑, 컨텍스트 생성 |
+| **Phase 2** | `elden-secure-coding` | 이윤태 | 정적 분석, LLM 패치 생성, 후보 이미지 빌드 |
+| **Phase 3** | `elden-staging` | 이윤태 | 기동/회귀/공격재현/SLO 검증, 통과 이미지 선택 |
+| **Phase 4** | `elden-governance` | 이종윤 | 정책 검증, GitOps 반영, Canary 승격, 롤백 |
+| System | `elden-canary` | 이종윤 | Canary 트래픽 분할 테스트 |
+| System | `elden-monitoring` | 이종윤 | Prometheus, Grafana, Loki, Falco |
 | System | `elden-harness` | 이종윤 | Harness Delegate |
 
 > 각 Phase별 상세 작업 안내는 [CONTRIBUTING.md](CONTRIBUTING.md)를 참고하세요.
@@ -184,6 +184,6 @@ feature/* → PR to dev → 자동 검증 → dev 머지 → Staging 배포 → 
 
 | 이름 | 역할 | 담당 Phase |
 |---|---|---|
-| 이종윤 (팀장) | 아키텍처 / 인프라 | K8s 환경 + Phase 1 (Runtime Defense) |
-| 이주오 | AI / 검증 | Phase 2 (Secure Coding) + Phase 3 (Recovery Assurance) |
-| 이윤태 | 운영 / 가시성 | Phase 4 (Governance) + 모니터링/대시보드 |
+| 이종윤 (팀장) | 아키텍처 / 인프라 / 통제 | K8s 환경 + Phase 4 (Governance) + 모니터링/대시보드/GitOps |
+| 이주오 | 탐지 / 방어 | Phase 1 (Runtime Defense) |
+| 이윤태 | AI / 검증 | Phase 2 (Secure Coding) + Phase 3 (Recovery Assurance) |

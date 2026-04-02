@@ -1,7 +1,7 @@
-# Recovery Assurance Plane - 공동 (이주오 + 이윤태)
+# Recovery Assurance Plane - 이윤태
 
-> Staging 환경에서 패치 후보를 3단계로 검증하는 Plane
-> 이주오: 검증 시나리오 자동화 / 이윤태: 테스트 환경 정리
+> Staging 환경에서 패치 후보를 4단계로 검증하는 Plane
+> 기동 검증, 회귀 테스트, 공격 재현, SLO 검증 수행
 
 ---
 

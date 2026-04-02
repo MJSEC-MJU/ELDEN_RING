@@ -1,4 +1,4 @@
-# Grafana Custom Dashboards - 이윤태
+# Grafana Custom Dashboards - 이종윤
 
 > 이 디렉토리에 Grafana 대시보드 JSON 파일을 추가하세요.
 

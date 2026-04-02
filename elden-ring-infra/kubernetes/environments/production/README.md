@@ -1,6 +1,6 @@
-# Runtime Defense Plane - 이종윤
+# Runtime Defense Plane - 이주오
 
-> 담당: 전체 시스템 아키텍처 설계, Kubernetes 환경 구성, 방어/통제 계층 설계
+> 담당: 위협 탐지, 이벤트 정규화, CWE 매핑, 소스코드 매핑, 컨텍스트 패키지 생성
 
 ---
 

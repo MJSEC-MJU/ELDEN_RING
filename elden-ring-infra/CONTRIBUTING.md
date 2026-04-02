@@ -30,7 +30,7 @@ feature/*  →  dev  →  main
 
 ## Phase 1: Runtime Defense Plane
 
-> **담당**: 이종윤
+> **담당**: 이주오
 > **작업 폴더**: `kubernetes/environments/production/`
 
 ### 개요
@@ -88,7 +88,7 @@ kubectl apply -f kubernetes/environments/production/<내 매니페스트>.yaml
 
 ## Phase 2: Secure Coding Plane
 
-> **담당**: 이주오
+> **담당**: 이윤태
 > **작업 폴더**: `kubernetes/environments/secure-coding/`
 
 ### 개요
@@ -155,7 +155,7 @@ kubectl apply -f kubernetes/environments/secure-coding/<내 매니페스트>.yam
 
 ## Phase 3: Recovery Assurance Plane
 
-> **담당**: 이주오
+> **담당**: 이윤태
 > **작업 폴더**: `kubernetes/environments/staging/`
 
 ### 개요
@@ -224,7 +224,7 @@ kubectl apply -f kubernetes/environments/staging/<내 매니페스트>.yaml
 
 ## Phase 4: Governance Plane
 
-> **담당**: 이윤태
+> **담당**: 이종윤
 > **작업 폴더**: `kubernetes/environments/governance/`
 > **대시보드**: `kubernetes/monitoring/grafana/`
 

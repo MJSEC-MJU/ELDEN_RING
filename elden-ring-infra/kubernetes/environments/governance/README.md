@@ -1,6 +1,6 @@
-# Governance Plane - 이윤태
+# Governance Plane - 이종윤
 
-> 담당: 모니터링/대시보드 구현, GitOps 및 배포 자동화, 서버 통합 및 테스트 환경 정리
+> 담당: 정책 검증, GitOps 반영, Canary 승격, 자동 롤백, 모니터링/대시보드
 
 ---
 
