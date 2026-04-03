@@ -1,0 +1,158 @@
+# ============================================================
+# ELDEN RING - Resource Quotas & Limit Ranges
+# Plane별 리소스 제한으로 안정성 확보
+# ============================================================
+
+# --- Production (Runtime Defense Plane) ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: production-quota
+  namespace: elden-production
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "30"
+    services: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: production-limits
+  namespace: elden-production
+spec:
+  limits:
+    - default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      type: Container
+
+---
+# --- Staging (Recovery Assurance Plane) ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: staging-quota
+  namespace: elden-staging
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "30"
+    services: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: staging-limits
+  namespace: elden-staging
+spec:
+  limits:
+    - default:
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      type: Container
+
+---
+# --- Secure Coding Plane ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: secure-coding-quota
+  namespace: elden-secure-coding
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    pods: "15"
+    jobs.batch: "10"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: secure-coding-limits
+  namespace: elden-secure-coding
+spec:
+  limits:
+    - default:
+        cpu: 1000m
+        memory: 1Gi
+      defaultRequest:
+        cpu: 200m
+        memory: 256Mi
+      type: Container
+
+---
+# --- Governance Plane ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: governance-quota
+  namespace: elden-governance
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    pods: "15"
+    services: "5"
+
+---
+# --- Monitoring ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: monitoring-quota
+  namespace: elden-monitoring
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "20"
+    persistentvolumeclaims: "10"
+
+---
+# --- Canary ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: canary-quota
+  namespace: elden-canary
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    pods: "10"
+
+---
+# --- Harness ---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: harness-quota
+  namespace: elden-harness
+spec:
+  hard:
+    requests.cpu: "1"
+    requests.memory: 2Gi
+    limits.cpu: "2"
+    limits.memory: 4Gi
+    pods: "5"

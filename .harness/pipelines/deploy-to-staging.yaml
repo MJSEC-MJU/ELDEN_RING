@@ -1,0 +1,98 @@
+# ============================================================
+# ELDEN RING - Deploy to Staging Pipeline
+# Recovery Assurance Plane에서 패치 후보를 검증하기 위한
+# Staging 환경 배포 파이프라인
+# ============================================================
+pipeline:
+  name: Deploy to Staging
+  identifier: deploy_to_staging
+  projectIdentifier: eldenring
+  orgIdentifier: default
+  tags:
+    plane: recovery-assurance
+  properties:
+    ci:
+      codebase:
+        connectorRef: eldenringgit
+        build: <+input>
+  stages:
+    - stage:
+        name: Build and Push Image
+        identifier: build_push
+        type: CI
+        spec:
+          cloneCodebase: true
+          infrastructure:
+            type: KubernetesDirect
+            spec:
+              connectorRef: eldenringk8scluster
+              namespace: elden-harness
+          execution:
+            steps:
+              - step:
+                  name: Build Image
+                  identifier: build_image
+                  type: BuildAndPushDockerRegistry
+                  spec:
+                    connectorRef: eldenringdocker
+                    repo: eldenring/target-app
+                    tags:
+                      - <+pipeline.sequenceId>-staging
+                      - latest-staging
+                    dockerfile: Dockerfile
+                    context: "."
+    - stage:
+        name: Deploy to Staging Namespace
+        identifier: deploy_staging
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: eldentargetapp
+            serviceInputs:
+              serviceDefinition:
+                type: Kubernetes
+                spec:
+                  artifacts:
+                    primary:
+                      primaryArtifactRef: target_app_image
+                      sources:
+                        - identifier: target_app_image
+                          type: DockerRegistry
+                          spec:
+                            tag: <+pipeline.sequenceId>-staging
+          environment:
+            environmentRef: eldenstaging
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: elden_staging_infra
+          execution:
+            steps:
+              - step:
+                  name: Rolling Deploy to Staging
+                  identifier: rolling_deploy
+                  type: K8sRollingDeploy
+                  timeout: 10m
+                  spec:
+                    skipDryRun: false
+              - step:
+                  name: Wait for Pods Ready
+                  identifier: wait_ready
+                  type: ShellScript
+                  timeout: 5m
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          kubectl rollout status deployment -n elden-staging --timeout=300s
+                          echo "All staging pods ready"
+            rollbackSteps:
+              - step:
+                  name: Rollback Staging
+                  identifier: rollback_staging
+                  type: K8sRollingRollback
+                  timeout: 5m
+                  spec: {}

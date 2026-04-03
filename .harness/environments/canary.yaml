@@ -1,0 +1,24 @@
+# Harness Environment - Canary (Governance 단계적 승격)
+environment:
+  name: elden-canary
+  identifier: eldencanary
+  type: PreProduction
+  tags:
+    plane: governance
+  variables:
+    - name: NAMESPACE
+      type: String
+      value: elden-canary
+    - name: REPLICA_COUNT
+      type: String
+      value: "1"
+    - name: CANARY_WEIGHT
+      type: String
+      value: "10"
+  infrastructureDefinitions:
+    - identifier: elden_canary_infra
+      type: KubernetesDirect
+      spec:
+        connectorRef: eldenringk8scluster
+        namespace: elden-canary
+        releaseName: release-<+INFRA_KEY_SHORT_ID>

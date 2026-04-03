@@ -1,0 +1,263 @@
+# ============================================================
+# ELDEN RING - Dev Branch CI (GitHub Actions)
+# dev에 머지되면: 변경된 Phase만 빌드 → 이미지 push → 배포
+# ============================================================
+name: Dev CI
+
+on:
+  push:
+    branches: [dev]
+
+env:
+  REGISTRY: docker.io
+  ORG: eldenring
+
+jobs:
+  # ──────────────────────────────────────
+  # 어떤 Phase가 변경됐는지 감지
+  # ──────────────────────────────────────
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      phase1: ${{ steps.filter.outputs.phase1 }}
+      phase2: ${{ steps.filter.outputs.phase2 }}
+      phase3: ${{ steps.filter.outputs.phase3 }}
+      phase4: ${{ steps.filter.outputs.phase4 }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            phase1:
+              - 'services/runtime-defense/**'
+            phase2:
+              - 'services/secure-coding/**'
+            phase3:
+              - 'services/recovery-assurance/**'
+            phase4:
+              - 'services/governance/**'
+            infra:
+              - 'kubernetes/**'
+
+  # ──────────────────────────────────────
+  # Phase 1: Runtime Defense (이주오)
+  # ──────────────────────────────────────
+  phase1-build:
+    name: "Phase 1: Runtime Defense"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.phase1 == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/runtime-defense
+          push: true
+          tags: |
+            ${{ env.ORG }}/runtime-defense:dev-${{ github.sha }}
+            ${{ env.ORG }}/runtime-defense:dev-latest
+          cache-from: type=gha,scope=phase1
+          cache-to: type=gha,scope=phase1,mode=max
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ORG }}/runtime-defense:dev-${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: 0
+
+  phase1-deploy:
+    name: "Phase 1: Deploy"
+    needs: phase1-build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+      - name: Deploy
+        run: |
+          # K8s 매니페스트가 있으면 적용
+          if ls kubernetes/environments/production/runtime-defense*.yaml 2>/dev/null; then
+            kubectl apply -f kubernetes/environments/production/ -n elden-production
+          fi
+          # 이미지 태그 업데이트
+          kubectl set image deployment/runtime-defense-controller \
+            controller=${{ env.ORG }}/runtime-defense:dev-${{ github.sha }} \
+            -n elden-production 2>/dev/null || echo "Deployment not found yet - skip image update"
+
+  # ──────────────────────────────────────
+  # Phase 2: Secure Coding (이윤태)
+  # ──────────────────────────────────────
+  phase2-build:
+    name: "Phase 2: Secure Coding"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.phase2 == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/secure-coding
+          push: true
+          tags: |
+            ${{ env.ORG }}/secure-coding:dev-${{ github.sha }}
+            ${{ env.ORG }}/secure-coding:dev-latest
+          cache-from: type=gha,scope=phase2
+          cache-to: type=gha,scope=phase2,mode=max
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ORG }}/secure-coding:dev-${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: 0
+
+  phase2-deploy:
+    name: "Phase 2: Deploy"
+    needs: phase2-build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+      - name: Deploy
+        run: |
+          if ls kubernetes/environments/secure-coding/*.yaml 2>/dev/null; then
+            kubectl apply -f kubernetes/environments/secure-coding/ -n elden-secure-coding
+          fi
+
+  # ──────────────────────────────────────
+  # Phase 3: Recovery Assurance (이윤태)
+  # ──────────────────────────────────────
+  phase3-build:
+    name: "Phase 3: Recovery Assurance"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.phase3 == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/recovery-assurance
+          push: true
+          tags: |
+            ${{ env.ORG }}/recovery-assurance:dev-${{ github.sha }}
+            ${{ env.ORG }}/recovery-assurance:dev-latest
+          cache-from: type=gha,scope=phase3
+          cache-to: type=gha,scope=phase3,mode=max
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ORG }}/recovery-assurance:dev-${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: 0
+
+  phase3-deploy:
+    name: "Phase 3: Deploy"
+    needs: phase3-build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+      - name: Deploy
+        run: |
+          if ls kubernetes/environments/staging/recovery-assurance*.yaml 2>/dev/null; then
+            kubectl apply -f kubernetes/environments/staging/ -n elden-staging
+          fi
+
+  # ──────────────────────────────────────
+  # Phase 4: Governance (이종윤)
+  # ──────────────────────────────────────
+  phase4-build:
+    name: "Phase 4: Governance"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.phase4 == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+      - name: Build and Push
+        uses: docker/build-push-action@v5
+        with:
+          context: services/governance
+          push: true
+          tags: |
+            ${{ env.ORG }}/governance:dev-${{ github.sha }}
+            ${{ env.ORG }}/governance:dev-latest
+          cache-from: type=gha,scope=phase4
+          cache-to: type=gha,scope=phase4,mode=max
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.ORG }}/governance:dev-${{ github.sha }}
+          severity: HIGH,CRITICAL
+          exit-code: 0
+
+  phase4-deploy:
+    name: "Phase 4: Deploy"
+    needs: phase4-build
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+      - name: Deploy
+        run: |
+          if ls kubernetes/environments/governance/*.yaml 2>/dev/null; then
+            kubectl apply -f kubernetes/environments/governance/ -n elden-governance
+          fi
+
+  # ──────────────────────────────────────
+  # Infra 변경 시 적용
+  # ──────────────────────────────────────
+  infra-apply:
+    name: Apply Infrastructure
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+      - name: Apply Base Resources
+        run: |
+          kubectl apply -f kubernetes/base/ --recursive

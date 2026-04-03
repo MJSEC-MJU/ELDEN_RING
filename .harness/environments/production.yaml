@@ -1,0 +1,26 @@
+# Harness Environment - Production
+environment:
+  name: elden-production
+  identifier: eldenproduction
+  type: Production
+  tags:
+    plane: runtime-defense
+  variables:
+    - name: NAMESPACE
+      type: String
+      value: elden-production
+    - name: REPLICA_COUNT
+      type: String
+      value: "3"
+    - name: ISTIO_INJECTION
+      type: String
+      value: "enabled"
+  overrides:
+    manifests: []
+  infrastructureDefinitions:
+    - identifier: elden_prod_infra
+      type: KubernetesDirect
+      spec:
+        connectorRef: eldenringk8scluster
+        namespace: elden-production
+        releaseName: release-<+INFRA_KEY_SHORT_ID>
