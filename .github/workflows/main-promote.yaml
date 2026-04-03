@@ -19,35 +19,35 @@ jobs:
     name: Sync Infrastructure to Production
     runs-on: ubuntu-latest
     environment: production
-    # KUBECONFIG가 설정된 경우에만 실행
-    if: ${{ secrets.KUBECONFIG != '' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Set kubeconfig
+        id: kubeconfig
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-
-      - name: Test cluster connection
-        id: cluster
-        run: |
-          if kubectl cluster-info > /dev/null 2>&1; then
-            echo "connected=true" >> $GITHUB_OUTPUT
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping"
           else
-            echo "connected=false" >> $GITHUB_OUTPUT
-            echo "WARNING: Cannot connect to cluster - skipping deploy"
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping"
+            fi
           fi
 
       - name: Apply Infrastructure Changes
-        if: steps.cluster.outputs.connected == 'true'
+        if: steps.kubeconfig.outputs.configured == 'true'
         run: |
           echo "=== Syncing Infrastructure to Production ==="
           kubectl apply -f kubernetes/base/ --recursive
           echo "Production infra synced with main branch"
 
       - name: Verify
-        if: steps.cluster.outputs.connected == 'true'
+        if: steps.kubeconfig.outputs.configured == 'true'
         run: |
           for ns in elden-production elden-staging elden-canary elden-secure-coding elden-governance elden-monitoring elden-harness; do
             STATUS=$(kubectl get ns $ns -o jsonpath='{.status.phase}' 2>/dev/null || echo "MISSING")
