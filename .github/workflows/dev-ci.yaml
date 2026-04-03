@@ -85,6 +85,10 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          if ! kubectl cluster-info > /dev/null 2>&1; then
+            echo "WARNING: No cluster connection - skipping deploy"
+            exit 0
+          fi
       - name: Deploy
         run: |
           # K8s 매니페스트가 있으면 적용
@@ -139,6 +143,10 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          if ! kubectl cluster-info > /dev/null 2>&1; then
+            echo "WARNING: No cluster connection - skipping deploy"
+            exit 0
+          fi
       - name: Deploy
         run: |
           if ls kubernetes/environments/secure-coding/*.yaml 2>/dev/null; then
@@ -188,6 +196,10 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          if ! kubectl cluster-info > /dev/null 2>&1; then
+            echo "WARNING: No cluster connection - skipping deploy"
+            exit 0
+          fi
       - name: Deploy
         run: |
           if ls kubernetes/environments/staging/recovery-assurance*.yaml 2>/dev/null; then
@@ -237,6 +249,10 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          if ! kubectl cluster-info > /dev/null 2>&1; then
+            echo "WARNING: No cluster connection - skipping deploy"
+            exit 0
+          fi
       - name: Deploy
         run: |
           if ls kubernetes/environments/governance/*.yaml 2>/dev/null; then
@@ -258,6 +274,10 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          if ! kubectl cluster-info > /dev/null 2>&1; then
+            echo "WARNING: No cluster connection - skipping deploy"
+            exit 0
+          fi
       - name: Apply Base Resources
         run: |
           kubectl apply -f kubernetes/base/ --recursive
