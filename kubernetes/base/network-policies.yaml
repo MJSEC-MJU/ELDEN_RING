@@ -1,0 +1,246 @@
+# ============================================================
+# ELDEN RING - Network Policies
+# Plane 간 격리 및 허용 트래픽 제어
+# ============================================================
+
+# --- Production NS: Runtime Defense Plane 트래픽 제어 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: production-default-deny
+  namespace: elden-production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: production-allow-ingress
+  namespace: elden-production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    # 외부 트래픽 (Istio Ingress Gateway 경유)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+    # 모니터링 스크래핑 허용
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-monitoring
+      ports:
+        - protocol: TCP
+          port: 15090
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 8080  # Falco Sidekick → runtime-defense-controller webhook
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: production-allow-egress
+  namespace: elden-production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Pod 간 통신
+    - to:
+        - podSelector: {}
+    # Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
+    # Redis (Phase 간 메시지 브로커)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-monitoring
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Phase 1 → Phase 2 직접 전달 (컨텍스트 패키지)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-secure-coding
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+# --- Staging NS: Recovery Assurance Plane 격리 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: staging-default-deny
+  namespace: elden-staging
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: staging-allow-internal
+  namespace: elden-staging
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Governance Plane에서 검증 요청 허용
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-governance
+    # Harness Delegate에서 배포 허용
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-harness
+    # 모니터링
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-monitoring
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector: {}
+    # Redis (Phase 간 메시지 브로커)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-monitoring
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# --- Secure Coding NS: 외부 접근 차단, AI 작업 전용 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: secure-coding-default-deny
+  namespace: elden-secure-coding
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: secure-coding-allow
+  namespace: elden-secure-coding
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Phase 1(Runtime Defense)에서 컨텍스트 패키지 수신
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-production
+      ports:
+        - protocol: TCP
+          port: 8080
+    # Governance Plane에서 작업 트리거
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-governance
+    # Harness Delegate
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-harness
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Internal pods
+    - to:
+        - podSelector: {}
+    # LLM API 접근 (HTTPS)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # Redis (Phase 간 메시지 브로커)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: elden-monitoring
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# --- Governance NS ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: governance-allow-all-elden
+  namespace: elden-governance
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: elden-ring
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: elden-ring
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Git, Harness API
+    - ports:
+        - protocol: TCP
+          port: 443

@@ -1,0 +1,24 @@
+# Harness Environment - Staging (Recovery Assurance)
+environment:
+  name: elden-staging
+  identifier: eldenstaging
+  type: PreProduction
+  tags:
+    plane: recovery-assurance
+  variables:
+    - name: NAMESPACE
+      type: String
+      value: elden-staging
+    - name: REPLICA_COUNT
+      type: String
+      value: "2"
+    - name: ISTIO_INJECTION
+      type: String
+      value: "enabled"
+  infrastructureDefinitions:
+    - identifier: elden_staging_infra
+      type: KubernetesDirect
+      spec:
+        connectorRef: eldenringk8scluster
+        namespace: elden-staging
+        releaseName: release-<+INFRA_KEY_SHORT_ID>

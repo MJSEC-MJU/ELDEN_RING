@@ -1,0 +1,55 @@
+# ============================================================
+# ELDEN RING - Main Branch Sync (GitHub Actions)
+# dev → main 머지 시: Production 기본 이미지 동기화
+# (수동 개발자 코드 변경의 Production 반영만 담당)
+#
+# NOTE: 실제 보안 패치의 Production 승격은
+#       Governance Plane이 자동으로 처리합니다.
+#       이 워크플로우는 인프라/설정 변경 동기화용입니다.
+# NOTE: KUBECONFIG secret이 설정되지 않으면 skip됩니다.
+# ============================================================
+name: Main Sync
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync-infra:
+    name: Sync Infrastructure to Production
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set kubeconfig
+        id: kubeconfig
+        run: |
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping"
+            fi
+          fi
+
+      - name: Apply Infrastructure Changes
+        if: steps.kubeconfig.outputs.configured == 'true'
+        run: |
+          echo "=== Syncing Infrastructure to Production ==="
+          kubectl apply -f kubernetes/base/ --recursive
+          echo "Production infra synced with main branch"
+
+      - name: Verify
+        if: steps.kubeconfig.outputs.configured == 'true'
+        run: |
+          for ns in elden-production elden-staging elden-canary elden-secure-coding elden-governance elden-monitoring elden-harness; do
+            STATUS=$(kubectl get ns $ns -o jsonpath='{.status.phase}' 2>/dev/null || echo "MISSING")
+            echo "  $ns: $STATUS"
+          done

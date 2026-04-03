@@ -1,0 +1,63 @@
+# ============================================================
+# ELDEN RING - Loki Stack Helm Values
+# 로그 수집 및 중앙 집중 관리
+# ============================================================
+loki:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  config:
+    limits_config:
+      retention_period: 336h  # 14일
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: boltdb-shipper
+          object_store: filesystem
+          schema: v11
+          index:
+            prefix: index_
+            period: 24h
+
+promtail:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  config:
+    snippets:
+      # ELDEN RING 네임스페이스 로그만 수집
+      pipelineStages:
+        - docker: {}
+        - match:
+            selector: '{namespace=~"elden-.*"}'
+            stages:
+              - regex:
+                  expression: '.*level=(?P<level>[a-zA-Z]+).*'
+              - labels:
+                  level:
+        - match:
+            selector: '{namespace=~"elden-.*"}'
+            stages:
+              - json:
+                  expressions:
+                    event_type: event_type
+                    plane: plane
+              - labels:
+                  event_type:
+                  plane:
+
+grafana:
+  enabled: false  # kube-prometheus-stack에서 이미 설치

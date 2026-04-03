@@ -1,0 +1,43 @@
+# ============================================================
+# ELDEN RING - Redis (Phase 간 메시지 브로커)
+# bitnami/redis Helm Values
+#
+# Phase 1 → 2 → 3 → 4 간 컨텍스트 전달용
+# Pub/Sub + List(Queue) 방식 지원
+# ============================================================
+
+# Phase 간 통신 전용이므로 비밀번호 없이 내부 전용 운영
+# (NetworkPolicy로 elden-* NS만 접근 가능)
+auth:
+  enabled: false
+
+# 단일 인스턴스 (캡스톤 규모에 충분)
+architecture: standalone
+
+master:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    size: 2Gi
+  service:
+    ports:
+      redis: 6379
+
+# Sentinel/Replica 불필요
+replica:
+  replicaCount: 0
+
+# 메트릭 수집 (Prometheus)
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: elden-monitoring
+    labels:
+      app.kubernetes.io/part-of: elden-ring
