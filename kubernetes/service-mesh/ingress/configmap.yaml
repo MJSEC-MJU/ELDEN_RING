@@ -1,0 +1,37 @@
+# ============================================================
+# ELDEN RING - NGINX Ingress Controller ConfigMap
+# ModSecurity WAF + OWASP CRS 활성화
+# ingress-nginx 네임스페이스의 Ingress Controller에 적용
+#
+# 적용 방법:
+#   kubectl apply -f configmap.yaml
+#   kubectl rollout restart deployment ingress-nginx-controller -n ingress-nginx
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+data:
+  # ModSecurity WAF 활성화
+  enable-modsecurity: "true"
+  # OWASP Core Rule Set 활성화 (SQLi, XSS, Path Traversal 등 탐지)
+  enable-owasp-modsecurity-crs: "true"
+  # Ingress annotation에서 modsecurity-snippet 사용 허용
+  allow-snippet-annotations: "true"
+  # ModSecurity 상세 설정
+  modsecurity-snippet: |
+    # 차단 모드 (DetectionOnly가 아닌 On)
+    SecRuleEngine On
+    # 요청 본문 검사 활성화
+    SecRequestBodyAccess On
+    # JSON Content-Type 파싱 활성화
+    SecRule REQUEST_HEADERS:Content-Type "application/json" \
+      "id:200001,phase:1,t:none,t:lowercase,pass,nolog,ctl:requestBodyProcessor=JSON"
+    # 감사 로그를 stdout으로 JSON 형식 출력 (runtime-defense-controller가 수집)
+    SecAuditLog /dev/stdout
+    SecAuditLogFormat JSON
+    SecAuditEngine RelevantOnly
+    # 요청 본문 크기 제한
+    SecRequestBodyLimit 13107200
+    SecRequestBodyLimitAction Reject
