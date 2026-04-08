@@ -10,8 +10,9 @@ falco:
     enabled: true
     url: "http://falco-sidekick.elden-monitoring:2801"
 
-  rules:
-    # ELDEN RING 전용 탐지 규칙
+# ELDEN RING 전용 탐지 규칙 (customRules로 마운트)
+customRules:
+  elden-ring-rules.yaml: |-
     - macro: elden_ring_namespace
       condition: k8s.ns.name startswith "elden-"
 
