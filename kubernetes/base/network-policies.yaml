@@ -135,6 +135,11 @@ spec:
           port: 53
     - to:
         - podSelector: {}
+    # Istio control plane (istiod)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: istio-system
     # Redis (Phase 간 메시지 브로커)
     - to:
         - namespaceSelector:
