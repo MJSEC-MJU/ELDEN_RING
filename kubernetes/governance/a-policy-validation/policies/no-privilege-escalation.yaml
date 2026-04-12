@@ -1,0 +1,65 @@
+# ============================================================
+# A. Policy Validation — block containers that escalate privilege
+# Checks: AI-generated patch manifests, Phase 2 candidate Deployments
+# ============================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: elden-no-privilege-escalation
+  labels:
+    elden-ring/layer: a-policy-validation
+    elden-ring/risk: high
+  annotations:
+    policies.kyverno.io/title: No privilege escalation
+    policies.kyverno.io/category: elden-governance
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >
+      AI가 생성한 패치/정책 manifest가 컨테이너에 privileged,
+      allowPrivilegeEscalation, hostPID/hostNetwork/hostIPC 같은
+      위험 권한을 부여하지 못하도록 차단한다.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: deny-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["elden-*"]
+      validate:
+        message: "privileged=true 는 elden-* 네임스페이스에서 금지"
+        pattern:
+          spec:
+            =(initContainers):
+              - =(securityContext):
+                  =(privileged): "false"
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
+    - name: deny-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["elden-*"]
+      validate:
+        message: "allowPrivilegeEscalation=true 금지"
+        pattern:
+          spec:
+            containers:
+              - =(securityContext):
+                  =(allowPrivilegeEscalation): "false"
+    - name: deny-host-namespaces
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["elden-*"]
+      validate:
+        message: "hostPID/hostNetwork/hostIPC 사용 금지"
+        pattern:
+          spec:
+            =(hostPID): "false"
+            =(hostNetwork): "false"
+            =(hostIPC): "false"

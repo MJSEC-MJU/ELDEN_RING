@@ -1,0 +1,26 @@
+# ============================================================
+# A. Policy Validation — 시스템 컴포넌트용 예외 (최소 범위)
+# elden-harness / elden-monitoring 의 기존 system pod 는
+# 일부 정책 대상에서 제외한다 (기존 배포와의 호환성).
+# 예외는 반드시 명시적이어야 하며, 범위는 주기적으로 축소한다.
+# ============================================================
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: elden-system-exception
+  namespace: kyverno
+  labels:
+    elden-ring/layer: a-policy-validation
+spec:
+  exceptions:
+    - policyName: elden-no-privilege-escalation
+      ruleNames:
+        - deny-host-namespaces
+  match:
+    any:
+      - resources:
+          kinds: [Pod]
+          namespaces: ["elden-harness", "elden-monitoring"]
+          selector:
+            matchLabels:
+              elden-ring/plane: system
