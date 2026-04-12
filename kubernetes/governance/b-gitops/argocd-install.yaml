@@ -1,0 +1,47 @@
+# ============================================================
+# B. GitOps — ArgoCD namespace + chart pin
+# Install:
+#   helm repo add argo https://argoproj.github.io/argo-helm
+#   helm upgrade --install argocd argo/argo-cd \
+#     -n argocd --create-namespace --version 7.7.7 \
+#     -f <(kubectl get cm -n argocd argocd-chart-values -o jsonpath='{.data.values\.yaml}')
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    app.kubernetes.io/part-of: elden-ring
+    elden-ring/plane: governance
+    elden-ring/layer: b-gitops
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-chart-pin
+  namespace: argocd
+  labels:
+    elden-ring/layer: b-gitops
+data:
+  chart: argo-cd
+  repo: https://argoproj.github.io/argo-helm
+  version: "7.7.7"
+  values.yaml: |
+    global:
+      domain: argocd.elden-ring.local
+    server:
+      extraArgs:
+        - --insecure
+    configs:
+      params:
+        application.namespaces: "argocd,elden-governance"
+      cm:
+        application.resourceTrackingMethod: annotation
+        accounts.governance-bot: apiKey
+      rbac:
+        policy.default: role:readonly
+        policy.csv: |
+          p, role:governance-promoter, applications, sync, elden/*, allow
+          p, role:governance-promoter, applications, get, elden/*, allow
+          p, role:governance-promoter, applications, action/*, elden/*, allow
+          g, governance-bot, role:governance-promoter

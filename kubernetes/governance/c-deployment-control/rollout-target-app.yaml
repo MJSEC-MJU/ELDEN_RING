@@ -1,0 +1,112 @@
+# ============================================================
+# C. Deployment Control — canary Rollout for target-app
+# Steps: 10% → pause(analysis) → 30% → 50% → manual-pause → 100%
+# Traffic shift via Istio VirtualService (see istio-virtualservice-canary.yaml)
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: target-app
+  namespace: elden-canary
+  labels:
+    app: target-app
+    elden-ring/layer: c-deployment-control
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: target-app
+  template:
+    metadata:
+      labels:
+        app: target-app
+        elden-ring/plane: governance
+    spec:
+      serviceAccountName: governance-sa
+      containers:
+        - name: target-app
+          image: ghcr.io/mjsec-mju/elden-target-app:placeholder
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+  strategy:
+    canary:
+      canaryService: target-app-canary
+      stableService: target-app-stable
+      trafficRouting:
+        istio:
+          virtualService:
+            name: target-app
+            routes:
+              - primary
+      steps:
+        - setWeight: 10
+        - pause: { duration: 2m }
+        - analysis:
+            templates:
+              - templateName: elden-canary-slo
+            args:
+              - name: service
+                value: target-app-canary
+        - setWeight: 30
+        - pause: { duration: 3m }
+        - analysis:
+            templates:
+              - templateName: elden-canary-slo
+            args:
+              - name: service
+                value: target-app-canary
+        - setWeight: 50
+        - pause: {}                     # manual approval required here
+        - setWeight: 100
+      analysis:
+        templates:
+          - templateName: elden-canary-slo
+        startingStep: 2
+        args:
+          - name: service
+            value: target-app-canary
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: target-app-stable
+  namespace: elden-canary
+  labels:
+    elden-ring/layer: c-deployment-control
+spec:
+  selector:
+    app: target-app
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: target-app-canary
+  namespace: elden-canary
+  labels:
+    elden-ring/layer: c-deployment-control
+spec:
+  selector:
+    app: target-app
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http

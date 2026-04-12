@@ -1,0 +1,33 @@
+# ============================================================
+# C. Deployment Control — Argo Rollouts namespace + chart pin
+#   helm repo add argo https://argoproj.github.io/argo-helm
+#   helm upgrade --install argo-rollouts argo/argo-rollouts \
+#     -n argo-rollouts --create-namespace --version 2.37.7 \
+#     --set dashboard.enabled=true
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-rollouts
+  labels:
+    app.kubernetes.io/part-of: elden-ring
+    elden-ring/plane: governance
+    elden-ring/layer: c-deployment-control
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argo-rollouts-chart-pin
+  namespace: argo-rollouts
+  labels:
+    elden-ring/layer: c-deployment-control
+data:
+  chart: argo-rollouts
+  repo: https://argoproj.github.io/argo-helm
+  version: "2.37.7"
+  values.yaml: |
+    dashboard:
+      enabled: true
+    controller:
+      metrics:
+        enabled: true

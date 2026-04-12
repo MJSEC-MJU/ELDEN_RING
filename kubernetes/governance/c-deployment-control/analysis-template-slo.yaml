@@ -1,0 +1,64 @@
+# ============================================================
+# C. Deployment Control — SLO analysis template (Prometheus-driven)
+# Thresholds mirror promotion-policy ConfigMap:
+#   error_rate_threshold: 5 (%)
+#   latency_p99_threshold: 1000 (ms)
+# Evaluated every 30s for 5 intervals; 2 failures → rollback.
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: elden-canary-slo
+  namespace: elden-canary
+  labels:
+    elden-ring/layer: c-deployment-control
+spec:
+  args:
+    - name: service
+    - name: namespace
+      value: elden-canary
+  metrics:
+    - name: error-rate
+      interval: 30s
+      count: 5
+      failureLimit: 2
+      successCondition: result[0] < 0.05
+      provider:
+        prometheus:
+          address: http://prometheus-kube-prometheus-prometheus.elden-monitoring:9090
+          query: |
+            sum(rate(istio_requests_total{
+              destination_service_name="{{args.service}}",
+              destination_service_namespace="{{args.namespace}}",
+              response_code=~"5.."
+            }[1m]))
+            /
+            sum(rate(istio_requests_total{
+              destination_service_name="{{args.service}}",
+              destination_service_namespace="{{args.namespace}}"
+            }[1m]))
+    - name: latency-p99
+      interval: 30s
+      count: 5
+      failureLimit: 2
+      successCondition: result[0] < 1000
+      provider:
+        prometheus:
+          address: http://prometheus-kube-prometheus-prometheus.elden-monitoring:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(istio_request_duration_milliseconds_bucket{
+                destination_service_name="{{args.service}}",
+                destination_service_namespace="{{args.namespace}}"
+              }[1m])) by (le)
+            )
+    - name: exploit-replay-pass
+      interval: 60s
+      count: 3
+      failureLimit: 1
+      successCondition: result[0] == 1
+      provider:
+        prometheus:
+          address: http://prometheus-kube-prometheus-prometheus.elden-monitoring:9090
+          query: |
+            max(elden_exploit_replay_pass{service="{{args.service}}"}) or vector(0)

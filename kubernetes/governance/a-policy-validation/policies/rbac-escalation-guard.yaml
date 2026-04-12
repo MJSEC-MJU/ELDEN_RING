@@ -1,0 +1,65 @@
+# ============================================================
+# A. Policy Validation — RBAC 변경안의 권한 상승 탐지
+# AI 가 새 Role/ClusterRole 을 만들 때 위험 verb 를 차단.
+# ============================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: elden-rbac-escalation-guard
+  labels:
+    elden-ring/layer: a-policy-validation
+    elden-ring/risk: high
+  annotations:
+    policies.kyverno.io/title: RBAC privilege-escalation guard
+    policies.kyverno.io/category: elden-governance
+    policies.kyverno.io/severity: critical
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: deny-wildcard-verbs
+      match:
+        any:
+          - resources:
+              kinds: [Role, ClusterRole]
+      validate:
+        message: "verbs 에 '*' 사용 금지. 명시적 verb 열거 필요."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.rules[*].verbs[] | contains(@, '*') }}"
+                operator: Equals
+                value: true
+    - name: deny-secrets-write-outside-system
+      match:
+        any:
+          - resources:
+              kinds: [Role, ClusterRole]
+      exclude:
+        any:
+          - resources:
+              namespaces: ["kube-system", "elden-harness"]
+      validate:
+        message: "secrets 에 대한 write 권한은 kube-system/elden-harness 외에는 금지"
+        deny:
+          conditions:
+            all:
+              - key: "{{ request.object.rules[?contains(resources || `[]`, 'secrets')].verbs[] | contains(@, 'create') || contains(@, 'update') || contains(@, 'patch') || contains(@, 'delete') }}"
+                operator: Equals
+                value: true
+    - name: deny-clusterrolebinding-to-anonymous
+      match:
+        any:
+          - resources:
+              kinds: [ClusterRoleBinding, RoleBinding]
+      validate:
+        message: "system:anonymous / system:unauthenticated 에 바인딩 금지"
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.subjects[*].name | contains(@, 'system:anonymous') }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.subjects[*].name | contains(@, 'system:unauthenticated') }}"
+                operator: Equals
+                value: true

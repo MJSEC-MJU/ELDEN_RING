@@ -1,0 +1,44 @@
+# ============================================================
+# A. Policy Validation — Kyverno install (namespace + HelmRelease marker)
+# Actual Kyverno deployment is installed via upstream chart:
+#   helm repo add kyverno https://kyverno.github.io/kyverno/
+#   helm upgrade --install kyverno kyverno/kyverno \
+#     --namespace kyverno --create-namespace \
+#     --version 3.2.6 \
+#     --set admissionController.replicas=2 \
+#     --set backgroundController.replicas=1 \
+#     --set cleanupController.replicas=1 \
+#     --set reportsController.replicas=1
+#
+# This file declares the namespace and a ConfigMap that records the
+# pinned chart version so ArgoCD (B layer) can reconcile it.
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyverno
+  labels:
+    app.kubernetes.io/part-of: elden-ring
+    elden-ring/plane: governance
+    elden-ring/layer: a-policy-validation
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kyverno-chart-pin
+  namespace: kyverno
+  labels:
+    elden-ring/layer: a-policy-validation
+data:
+  chart: kyverno
+  repo: https://kyverno.github.io/kyverno/
+  version: "3.2.6"
+  values: |
+    admissionController:
+      replicas: 2
+    backgroundController:
+      replicas: 1
+    cleanupController:
+      replicas: 1
+    reportsController:
+      replicas: 1
