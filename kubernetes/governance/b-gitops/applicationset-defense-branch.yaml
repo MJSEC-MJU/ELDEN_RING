@@ -1,0 +1,51 @@
+# ============================================================
+# B. GitOps — ApplicationSet that auto-creates an ArgoCD Application
+# per incident defense branch (defense/inc-*).
+#
+# Governance service creates a branch "defense/inc-<id>" with
+# candidate manifests; this ApplicationSet picks it up and syncs
+# the change into elden-canary. Merging to main → shadow/prod Apps
+# take over.
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: defense-branch
+  namespace: argocd
+  labels:
+    elden-ring/layer: b-gitops
+spec:
+  generators:
+    - pullRequest:
+        github:
+          owner: MJSEC-MJU
+          repo: ELDEN_RING
+          labels:
+            - defense-candidate
+          tokenRef:
+            secretName: github-token
+            key: token
+        requeueAfterSeconds: 60
+  template:
+    metadata:
+      name: "defense-inc-{{number}}"
+      labels:
+        elden-ring/layer: b-gitops
+        elden-ring/kind: defense-candidate
+    spec:
+      project: elden
+      source:
+        repoURL: https://github.com/MJSEC-MJU/ELDEN_RING.git
+        targetRevision: "{{branch}}"
+        path: kubernetes/environments/canary
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: elden-canary
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: false
+        syncOptions:
+          - CreateNamespace=false
+          - ApplyOutOfSyncOnly=true
+      revisionHistoryLimit: 10
