@@ -1,0 +1,55 @@
+# ============================================================
+# C. Deployment Control — approval policy ConfigMap
+# Risk classifier reads this to decide auto-promote vs manual-pause.
+# Low-risk  (WAF rule, rate-limit, NetworkPolicy)  → auto promote (pause=0)
+# High-risk (RBAC, code/image, Helm values)        → manual pause at 50%
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promotion-policy
+  namespace: elden-governance
+  labels:
+    elden-ring/layer: c-deployment-control
+data:
+  policy.yaml: |
+    risk_classes:
+      low:
+        auto_promote: true
+        require_manual_approval: false
+        canary_steps: [10, 30, 50, 100]
+        pause_duration: 2m
+        matches:
+          - kind: NetworkPolicy
+          - kind: ConfigMap
+            name_regex: "^(modsecurity|rate-limit|waf-).*"
+          - kind: EnvoyFilter
+      medium:
+        auto_promote: true
+        require_manual_approval: false
+        canary_steps: [10, 30, 50, 100]
+        pause_duration: 5m
+        matches:
+          - kind: Deployment
+            annotation: "elden-ring/change-kind=config-only"
+          - kind: VirtualService
+      high:
+        auto_promote: false
+        require_manual_approval: true
+        canary_steps: [10, 30, 50, 100]
+        pause_duration: manual
+        matches:
+          - kind: Role
+          - kind: ClusterRole
+          - kind: RoleBinding
+          - kind: ClusterRoleBinding
+          - kind: Deployment
+            annotation: "elden-ring/change-kind=image"
+          - kind: ServiceAccount
+    rollback:
+      triggers:
+        - analysis_failure: true
+        - error_rate_gt: 0.05
+        - p99_latency_ms_gt: 1000
+        - exploit_replay_regressed: true
+      action: abort_and_revert
