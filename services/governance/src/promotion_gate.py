@@ -7,14 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 class PromotionGate:
-    """C layer — drives Argo Rollouts pause/resume.
-
-    low/medium risk: resume all pauses automatically as analysis passes.
-    high risk      : leave the manual-pause step untouched until an operator
-                     issues resume (via `kubectl argo rollouts promote ...`
-                     or the /promote API endpoint).
-    """
-
     def __init__(self, k8s: K8sClient):
         self.k8s = k8s
 

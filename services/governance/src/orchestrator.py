@@ -7,6 +7,7 @@ import redis.asyncio as redis
 from .config import settings
 from .git_writer import GitWriter
 from .k8s_client import K8sClient
+from .manifest_builder import build_image_patch_manifests
 from .models import (
     Phase3Result,
     PromotionRequest,
@@ -22,13 +23,6 @@ logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    """Top-level state machine: Phase 3 PASSED → A gate → B git PR → C rollout.
-
-    Subscribes to `elden:phase4:promote` and drives each incident through
-    the three governance layers. Failures are NOT auto-retried here —
-    they are published to `elden:phase2:retry` for the secure-coding plane.
-    """
-
     def __init__(self, k8s: K8sClient):
         self.k8s = k8s
         self.classifier = self._load_classifier()
@@ -62,7 +56,7 @@ class Orchestrator:
                 continue
             try:
                 payload = json.loads(msg["data"])
-                await self._handle(Phase3Result(**payload), client)
+                await self._handle(Phase3Result.parse(payload), client)
             except Exception as e:
                 logger.exception("promote handler failed: %s", e)
 
@@ -72,6 +66,9 @@ class Orchestrator:
         if not result.all_passed:
             await self._reject_to_retry(result, client)
             return
+
+        if not result.manifests:
+            result.manifests = build_image_patch_manifests(result)
 
         risk = self.classifier.classify(result.manifests)
         req = PromotionRequest(
@@ -129,12 +126,20 @@ class Orchestrator:
 
     @staticmethod
     def _summarize(r: Phase3Result) -> str:
-        return (
-            f"- exploit replay: **{r.exploit}**\n"
-            f"- regression:    **{r.regression}**\n"
-            f"- SLO:           **{r.slo}**\n"
-            f"- candidate:     `{r.candidate_image}`"
-        )
+        lines = [
+            f"- exploit replay: **{r.exploit}**",
+            f"- regression:    **{r.regression}**",
+            f"- SLO:           **{r.slo}**",
+            f"- candidate:     `{r.candidate_image}`",
+        ]
+        if r.cwe_id:
+            lines.append(f"- CWE:           `{r.cwe_id}`")
+        if r.patch_id:
+            lines.append(f"- patch id:      `{r.patch_id}`")
+        if r.target_file:
+            loc = r.target_file + (f"::{r.target_function}" if r.target_function else "")
+            lines.append(f"- target:        `{loc}`")
+        return "\n".join(lines)
 
     def snapshot(self) -> list[PromotionRequest]:
         return list(self._state.values())

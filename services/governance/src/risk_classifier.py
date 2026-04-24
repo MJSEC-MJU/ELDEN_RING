@@ -7,13 +7,6 @@ from .models import RiskClass
 
 
 class RiskClassifier:
-    """Classify a set of candidate manifests into low/medium/high risk.
-
-    Rules come from ConfigMap `promotion-policy` (approval-gate-highrisk.yaml).
-    If the ConfigMap is unavailable, falls back to built-in defaults — fail-closed
-    (unknown kinds are treated as HIGH, never auto-promoted).
-    """
-
     HIGH_KINDS = {"Role", "ClusterRole", "RoleBinding", "ClusterRoleBinding", "ServiceAccount"}
     LOW_KINDS = {"NetworkPolicy", "EnvoyFilter"}
     LOW_CM_NAME_RE = re.compile(r"^(modsecurity|rate-limit|waf-).*")
@@ -39,9 +32,9 @@ class RiskClassifier:
 
         if kind in self.HIGH_KINDS:
             return RiskClass.HIGH
-        if kind == "Deployment" and change_kind == "image":
+        if kind in ("Deployment", "Rollout") and change_kind == "image":
             return RiskClass.HIGH
-        if kind == "Deployment" and change_kind == "config-only":
+        if kind in ("Deployment", "Rollout") and change_kind == "config-only":
             return RiskClass.MEDIUM
         if kind == "VirtualService":
             return RiskClass.MEDIUM
@@ -49,4 +42,4 @@ class RiskClassifier:
             return RiskClass.LOW
         if kind in self.LOW_KINDS:
             return RiskClass.LOW
-        return RiskClass.HIGH  # fail-closed default
+        return RiskClass.HIGH

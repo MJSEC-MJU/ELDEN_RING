@@ -10,14 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 class RollbackWatcher:
-    """Watches canary SLO via Prometheus; if either threshold breached for
-    two consecutive polls, triggers Rollout abort (auto-rollback).
-
-    Argo Rollouts AnalysisTemplate already does this for canary steps;
-    this watcher is a safety net for *post-promotion* drift on the
-    stable side (elden-canary → elden-production).
-    """
-
     def __init__(
         self,
         prom_url: str,

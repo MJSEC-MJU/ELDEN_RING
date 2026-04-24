@@ -8,13 +8,6 @@ logger = logging.getLogger(__name__)
 
 
 class GitWriter:
-    """B layer — creates a per-incident defense branch + PR on GitHub.
-
-    Layout written under: kubernetes/environments/canary/incidents/<id>/*.yaml
-    PR is opened against settings.base_branch with label `defense-candidate`
-    so ArgoCD ApplicationSet picks it up.
-    """
-
     def __init__(self, repo_full: str, token: str, base_branch: str, branch_prefix: str):
         if not token:
             raise RuntimeError("GitWriter requires a GitHub token")

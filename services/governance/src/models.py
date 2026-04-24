@@ -34,12 +34,45 @@ class Phase3Result(BaseModel):
     slo: ValidationStatus
     manifests: list[dict[str, Any]] = Field(default_factory=list)
 
+    event_id: str | None = None
+    patch_id: str | None = None
+    cwe_id: str | None = None
+    target_file: str | None = None
+    target_function: str | None = None
+    change_summary: dict[str, Any] | None = None
+    severity: str | None = None
+
     @property
     def all_passed(self) -> bool:
         return (
             self.exploit == ValidationStatus.PASSED
             and self.regression == ValidationStatus.PASSED
             and self.slo == ValidationStatus.PASSED
+        )
+
+    @classmethod
+    def parse(cls, payload: dict[str, Any]) -> "Phase3Result":
+        if "phase2" in payload:
+            return cls.from_envelope(payload)
+        return cls(**payload)
+
+    @classmethod
+    def from_envelope(cls, payload: dict[str, Any]) -> "Phase3Result":
+        p2 = payload["phase2"]
+        return cls(
+            incident_id=p2["event_id"],
+            candidate_image=p2["candidate_image"],
+            exploit=ValidationStatus(payload["exploit"]),
+            regression=ValidationStatus(payload["regression"]),
+            slo=ValidationStatus(payload["slo"]),
+            manifests=payload.get("manifests", []),
+            event_id=p2["event_id"],
+            patch_id=p2["patch_id"],
+            cwe_id=p2["cwe_id"],
+            target_file=p2["target_file"],
+            target_function=p2["target_function"],
+            change_summary=p2.get("change_summary"),
+            severity=payload.get("severity"),
         )
 
 

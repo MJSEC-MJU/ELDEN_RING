@@ -7,13 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 class PolicyGate:
-    """A layer gate — reads Kyverno PolicyReports for the canary namespace
-    after a defense branch is synced, returns pass/fail summary.
-
-    The actual enforcement already happened via Kyverno admission webhook;
-    this gate just aggregates results for the orchestrator's decision log.
-    """
-
     def __init__(self, k8s: K8sClient, canary_namespace: str):
         self.k8s = k8s
         self.ns = canary_namespace
