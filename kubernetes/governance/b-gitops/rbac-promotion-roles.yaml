@@ -1,0 +1,33 @@
+# ============================================================
+# B. GitOps — governance-sa permissions to drive ArgoCD promotion
+# Lets the orchestrator patch Applications (trigger sync/rollback)
+# and read ApplicationSets for defense branches.
+# ============================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elden-governance-argocd-role
+  labels:
+    elden-ring/layer: b-gitops
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications", "applicationsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["appprojects"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: elden-governance-argocd-binding
+  labels:
+    elden-ring/layer: b-gitops
+subjects:
+  - kind: ServiceAccount
+    name: governance-sa
+    namespace: elden-governance
+roleRef:
+  kind: ClusterRole
+  name: elden-governance-argocd-role
+  apiGroup: rbac.authorization.k8s.io

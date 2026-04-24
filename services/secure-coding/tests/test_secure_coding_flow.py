@@ -84,9 +84,17 @@ class SecureCodingFlowTests(unittest.TestCase):
         result = result_resp.json()["result"]
 
         self.assertEqual("READY_FOR_VALIDATION", result["patch_status"])
+        self.assertEqual(job_id, result["job_id"])
+        self.assertEqual("HIGH", result["severity"])
         self.assertTrue(result["workspace_applied"])
+        self.assertTrue(result["candidate_image"].startswith("ghcr.io/mjsec-mju/"))
         patched_source = (self.workspace / "routes" / "auth.py").read_text(encoding="utf-8")
         self.assertIn("db.execute(query, (username, password))", patched_source)
+        messages = self.client.app.state.store.list_messages(self.settings.secure_coding_validate_channel)
+        self.assertEqual(1, len(messages))
+        payload = messages[0]["payload_json"]
+        self.assertEqual(job_id, payload["job_id"])
+        self.assertEqual("HIGH", payload["severity"])
 
     def test_internal_analyze_uses_runtime_defense_context_wording(self) -> None:
         response = self.client.post("/api/v1/secure-coding/internal/analyze", json=self._context())

@@ -1,0 +1,60 @@
+# ============================================================
+# B. GitOps — ArgoCD AppProject: elden
+# Scopes what governance-bot can deploy. Explicit allow-lists only.
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: elden
+  namespace: argocd
+  labels:
+    elden-ring/layer: b-gitops
+spec:
+  description: ELDEN RING governance-managed deployments
+  sourceRepos:
+    - https://github.com/MJSEC-MJU/ELDEN_RING
+    - https://github.com/MJSEC-MJU/ELDEN_RING.git
+  destinations:
+    - namespace: elden-canary
+      server: https://kubernetes.default.svc
+    - namespace: elden-production
+      server: https://kubernetes.default.svc
+    - namespace: elden-staging
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: "*"
+    - group: apps
+      kind: "*"
+    - group: networking.k8s.io
+      kind: "*"
+    - group: networking.istio.io
+      kind: "*"
+    - group: security.istio.io
+      kind: "*"
+    - group: argoproj.io
+      kind: Rollout
+    - group: argoproj.io
+      kind: AnalysisRun
+    - group: argoproj.io
+      kind: AnalysisTemplate
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+  roles:
+    - name: promoter
+      description: governance-bot can sync approved apps only
+      policies:
+        - p, proj:elden:promoter, applications, sync, elden/*, allow
+        - p, proj:elden:promoter, applications, get, elden/*, allow
+      groups:
+        - governance-bot

@@ -1,0 +1,53 @@
+# ============================================================
+# C. Deployment Control — Istio VirtualService driven by Rollouts
+# Argo Rollouts patches the route weights during setWeight steps.
+# ============================================================
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: target-app
+  namespace: elden-canary
+  labels:
+    elden-ring/layer: c-deployment-control
+spec:
+  hosts:
+    - target-app.elden-canary.svc.cluster.local
+  http:
+    - name: primary
+      route:
+        - destination:
+            host: target-app-stable.elden-canary.svc.cluster.local
+            port:
+              number: 8080
+          weight: 100
+        - destination:
+            host: target-app-canary.elden-canary.svc.cluster.local
+            port:
+              number: 8080
+          weight: 0
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: target-app-stable
+  namespace: elden-canary
+  labels:
+    elden-ring/layer: c-deployment-control
+spec:
+  host: target-app-stable.elden-canary.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: target-app-canary
+  namespace: elden-canary
+  labels:
+    elden-ring/layer: c-deployment-control
+spec:
+  host: target-app-canary.elden-canary.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL

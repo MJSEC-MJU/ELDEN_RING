@@ -253,6 +253,7 @@ class SecureCodingService:
             event_id=context["event_id"],
             status="COMPLETED",
             result={
+                "job_id": job_id,
                 "context_id": context["context_id"],
                 "event_id": context["event_id"],
                 "patch_id": patch.patch_id,
@@ -261,6 +262,7 @@ class SecureCodingService:
                 "target_function": patch.target_function,
                 "patch_file": patch.patch_file,
                 "candidate_image": build.candidate_image,
+                "severity": context["metadata"]["severity"],
                 "build_log": build.build_log,
                 "analysis_summary": AnalysisSummary(
                     root_cause=strategy.root_cause,

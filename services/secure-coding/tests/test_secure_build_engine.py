@@ -29,13 +29,13 @@ class SecureCodingBuildEngineTests(unittest.TestCase):
             db_path=Path(self.temp_dir.name) / "secure_coding.db",
             redis_url=None,
             secure_coding_build_mode="command",
-            secure_coding_build_command="docker build -t repo/app:candidate-123 .",
+            secure_coding_build_command="docker build -t ghcr.io/mjsec-mju/app:candidate-123 .",
         )
         engine = SecureCodingBuildEngine(settings, self.store, self.artifact_root)
 
         candidate_image = engine._resolve_candidate_image("evt-001", "patch-001")
 
-        self.assertEqual("repo/app:candidate-123", candidate_image)
+        self.assertEqual("ghcr.io/mjsec-mju/app:candidate-123", candidate_image)
 
     def test_explicit_build_image_tag_overrides_command_inference(self) -> None:
         settings = PlaneSettings(
@@ -44,14 +44,43 @@ class SecureCodingBuildEngineTests(unittest.TestCase):
             db_path=Path(self.temp_dir.name) / "secure_coding.db",
             redis_url=None,
             secure_coding_build_mode="command",
-            secure_coding_build_command="docker build -t repo/app:wrong-tag .",
-            secure_coding_build_image_tag="repo/app:actual-tag",
+            secure_coding_build_command="docker build -t ghcr.io/mjsec-mju/app:wrong-tag .",
+            secure_coding_build_image_tag="ghcr.io/mjsec-mju/app:actual-tag",
         )
         engine = SecureCodingBuildEngine(settings, self.store, self.artifact_root)
 
         candidate_image = engine._resolve_candidate_image("evt-001", "patch-001")
 
-        self.assertEqual("repo/app:actual-tag", candidate_image)
+        self.assertEqual("ghcr.io/mjsec-mju/app:actual-tag", candidate_image)
+
+    def test_default_candidate_image_uses_ghcr_registry_prefix(self) -> None:
+        settings = PlaneSettings(
+            workspace_root=self.workspace_root,
+            artifact_root=self.artifact_root,
+            db_path=Path(self.temp_dir.name) / "secure_coding.db",
+            redis_url=None,
+        )
+        engine = SecureCodingBuildEngine(settings, self.store, self.artifact_root)
+
+        candidate_image = engine._resolve_candidate_image("evt-001", "patch-001")
+
+        self.assertEqual(
+            "ghcr.io/mjsec-mju/elden-target-app:candidate-evt-001-patch-001",
+            candidate_image,
+        )
+
+    def test_rejects_candidate_images_outside_allowed_registry(self) -> None:
+        settings = PlaneSettings(
+            workspace_root=self.workspace_root,
+            artifact_root=self.artifact_root,
+            db_path=Path(self.temp_dir.name) / "secure_coding.db",
+            redis_url=None,
+            secure_coding_build_image_tag="repo/app:actual-tag",
+        )
+        engine = SecureCodingBuildEngine(settings, self.store, self.artifact_root)
+
+        with self.assertRaisesRegex(ValueError, "ghcr.io/mjsec-mju"):
+            engine._resolve_candidate_image("evt-001", "patch-001")
 
 
 if __name__ == "__main__":

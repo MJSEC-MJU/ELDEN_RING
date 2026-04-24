@@ -1,0 +1,32 @@
+# ============================================================
+# ELDEN RING - target-app Ingress with ModSecurity WAF
+# ModSecurity + OWASP CRS blocks SQLi/XSS/Path Traversal at Ingress level
+# Blocked requests generate audit logs consumed by runtime-defense-controller
+# ============================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: target-app-ingress
+  namespace: elden-production
+  annotations:
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    nginx.ingress.kubernetes.io/enable-owasp-core-rules: "true"
+    nginx.ingress.kubernetes.io/modsecurity-transaction-id: "$request_id"
+    nginx.ingress.kubernetes.io/modsecurity-snippet: |
+      SecRuleEngine On
+      SecAuditLog /dev/stdout
+      SecAuditLogFormat JSON
+      SecAuditEngine RelevantOnly
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: target-app.elden.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: target-app
+                port:
+                  number: 5000

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from typing import Any
@@ -11,6 +12,8 @@ from .utils import generate_id, write_text
 
 
 class SecureCodingBuildEngine:
+    allowed_registry_prefix = "ghcr.io/mjsec-mju/"
+
     def __init__(self, settings: PlaneSettings, store: PlaneStore, artifact_root) -> None:
         self.settings = settings
         self.store = store
@@ -75,12 +78,20 @@ class SecureCodingBuildEngine:
 
     def _resolve_candidate_image(self, event_id: str, patch_id: str) -> str:
         if self.settings.secure_coding_build_image_tag:
-            return self.settings.secure_coding_build_image_tag
+            candidate_image = self.settings.secure_coding_build_image_tag
+            self._validate_candidate_image(candidate_image)
+            return candidate_image
         if self.settings.secure_coding_build_mode == "command" and self.settings.secure_coding_build_command:
             inferred_tag = self._infer_image_tag_from_build_command(self.settings.secure_coding_build_command)
             if inferred_tag:
+                self._validate_candidate_image(inferred_tag)
                 return inferred_tag
-        return f"registry.local/app/auth-service:candidate-{event_id}-{patch_id}"
+        candidate_image = (
+            "ghcr.io/mjsec-mju/elden-target-app:"
+            f"candidate-{self._normalize_tag_fragment(event_id)}-{self._normalize_tag_fragment(patch_id)}"
+        )
+        self._validate_candidate_image(candidate_image)
+        return candidate_image
 
     def _infer_image_tag_from_build_command(self, command: str) -> str | None:
         for posix in (True, False):
@@ -108,3 +119,14 @@ class SecureCodingBuildEngine:
             if token.startswith("--tag="):
                 return token.split("=", 1)[1].strip("\"'")
         return None
+
+    def _normalize_tag_fragment(self, value: str) -> str:
+        normalized = re.sub(r"[^a-z0-9_.-]+", "-", value.lower()).strip(".-")
+        return normalized or "unknown"
+
+    def _validate_candidate_image(self, candidate_image: str) -> None:
+        if not candidate_image.startswith(self.allowed_registry_prefix):
+            raise ValueError(
+                "Candidate image must use the ghcr.io/mjsec-mju/* registry prefix "
+                f"for Kyverno policy compatibility: {candidate_image}"
+            )

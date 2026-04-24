@@ -1,6 +1,7 @@
 # ============================================================
-# ELDEN RING - Production Deployment (보호 대상 서비스)
-# 팀원들이 이 서비스 위에 4 Plane을 올려 방어/패치/검증
+# ELDEN RING - target-app (Intentionally Vulnerable Flask App)
+# Contains 3 deliberate vulnerabilities: SQLi, XSS, Path Traversal
+# ModSecurity WAF blocks attacks at Ingress level before they reach this app
 # ============================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -9,66 +10,48 @@ metadata:
   namespace: elden-production
   labels:
     app: target-app
-    version: stable
-    elden-ring/plane: runtime-defense
+    elden-ring/plane: target
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: target-app
-      version: stable
   template:
     metadata:
       labels:
         app: target-app
-        version: stable
-        elden-ring/plane: runtime-defense
+        elden-ring/plane: target
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
-        prometheus.io/path: "/metrics"
+        sidecar.istio.io/inject: "true"
     spec:
-      serviceAccountName: runtime-defense-sa
       containers:
         - name: target-app
           image: eldenring/target-app:latest
           ports:
-            - containerPort: 8080
+            - containerPort: 5000
               name: http
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 250m
+              memory: 256Mi
           env:
-            - name: APP_ENV
-              value: "production"
-            - name: LOG_LEVEL
-              value: "info"
-            - name: LOG_FORMAT
-              value: "json"
+            - name: DB_PATH
+              value: "/app/data/users.db"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8080
-            initialDelaySeconds: 15
+              port: 5000
+            initialDelaySeconds: 10
             periodSeconds: 10
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-          volumeMounts:
-            - name: app-config
-              mountPath: /etc/app
-              readOnly: true
-      volumes:
-        - name: app-config
-          configMap:
-            name: target-app-config
 ---
 apiVersion: v1
 kind: Service
@@ -81,52 +64,7 @@ spec:
   selector:
     app: target-app
   ports:
-    - port: 8080
-      targetPort: 8080
+    - port: 5000
+      targetPort: 5000
       name: http
   type: ClusterIP
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: target-app-config
-  namespace: elden-production
-data:
-  config.yaml: |
-    server:
-      port: 8080
-      readTimeout: 30s
-      writeTimeout: 30s
-    database:
-      host: db-service
-      port: 5432
-      maxConnections: 20
-    security:
-      rateLimitPerSecond: 100
-      maxRequestBodySize: 1048576
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: target-app-hpa
-  namespace: elden-production
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: target-app
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80

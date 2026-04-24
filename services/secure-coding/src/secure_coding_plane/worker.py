@@ -29,16 +29,51 @@ class SecureCodingWorker:
         return accepted.job_id
 
     def handle_retry_payload(self, payload: dict[str, Any]) -> str:
-        job_id = payload["job_id"]
+        job_id = self._resolve_retry_job_id(payload)
         request = SecureCodingRetryRequest.model_validate(
             {
-                "reason": payload["reason"],
-                "retry_from_step": payload["retry_from_step"],
-                "validation_feedback": payload.get("validation_feedback", {}),
+                "reason": payload.get("reason") or "phase3_validation_failed",
+                "retry_from_step": payload.get("retry_from_step") or "patch",
+                "validation_feedback": self._build_validation_feedback(payload),
             }
         )
         self.service.retry_job_sync(job_id, request)
         return job_id
+
+    def _resolve_retry_job_id(self, payload: dict[str, Any]) -> str:
+        job_id = payload.get("job_id")
+        if isinstance(job_id, str) and job_id:
+            return job_id
+
+        phase2 = payload.get("phase2")
+        if isinstance(phase2, dict):
+            phase2_job_id = phase2.get("job_id")
+            if isinstance(phase2_job_id, str) and phase2_job_id:
+                return phase2_job_id
+
+        event_id = None
+        if isinstance(phase2, dict):
+            event_id = phase2.get("event_id")
+        if not event_id:
+            event_id = payload.get("event_id") or payload.get("incident_id")
+        if isinstance(event_id, str) and event_id:
+            job = self.store.get_secure_job_by_event(event_id)
+            if job:
+                return job["job_id"]
+
+        raise KeyError("Retry payload must include job_id or a resolvable event_id/incident_id")
+
+    def _build_validation_feedback(self, payload: dict[str, Any]) -> dict[str, Any]:
+        feedback = payload.get("validation_feedback")
+        merged = dict(feedback) if isinstance(feedback, dict) else {}
+        for key in ("exploit", "regression", "slo", "severity"):
+            value = payload.get(key)
+            if value is not None:
+                merged[key] = value
+        phase2 = payload.get("phase2")
+        if isinstance(phase2, dict):
+            merged["phase2"] = phase2
+        return merged
 
     def run_forever(self, sleep_sec: float = 1.0) -> None:
         if self._client is None:

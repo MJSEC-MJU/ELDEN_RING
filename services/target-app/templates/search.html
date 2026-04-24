@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<head><title>Search - ELDEN RING Target App</title></head>
+<body>
+  <h1>Search</h1>
+  <form action="/api/search" method="GET">
+    <input type="text" name="q" placeholder="Search...">
+    <button type="submit">Search</button>
+  </form>
+  <!-- XSS vulnerability: query parameter reflected without escaping in the /api/search endpoint -->
+</body>
+</html>

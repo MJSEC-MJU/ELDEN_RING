@@ -1,0 +1,38 @@
+# ============================================================
+# ELDEN RING - Route Map ConfigMap
+# Maps target-app endpoints to source code locations
+# Used by runtime-defense-controller for source code mapping
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: route-map
+  namespace: elden-production
+data:
+  routes.json: |
+    {
+      "POST /api/login": {
+        "file": "app.py",
+        "function": "login_handler",
+        "line_start": 28,
+        "line_end": 42,
+        "vulnerability": "SQL Injection",
+        "cwe_id": "CWE-89"
+      },
+      "GET /api/search": {
+        "file": "app.py",
+        "function": "search_handler",
+        "line_start": 51,
+        "line_end": 60,
+        "vulnerability": "Reflected XSS",
+        "cwe_id": "CWE-79"
+      },
+      "GET /api/file": {
+        "file": "app.py",
+        "function": "file_handler",
+        "line_start": 68,
+        "line_end": 74,
+        "vulnerability": "Path Traversal",
+        "cwe_id": "CWE-22"
+      }
+    }

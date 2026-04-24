@@ -202,6 +202,7 @@ class AnalysisSummary(BaseModel):
 
 
 class SecureCodingResult(BaseModel):
+    job_id: str
     context_id: str
     event_id: str
     patch_id: str
@@ -210,6 +211,7 @@ class SecureCodingResult(BaseModel):
     target_function: str
     patch_file: str
     candidate_image: str
+    severity: Severity
     build_log: str | None = None
     analysis_summary: AnalysisSummary
     change_summary: dict[str, Any] | None = None
@@ -229,7 +231,7 @@ class SecureCodingJobResultResponse(BaseModel):
 
 class SecureCodingRetryRequest(BaseModel):
     reason: str
-    retry_from_step: str
+    retry_from_step: str = "patch"
     validation_feedback: dict[str, Any] = Field(default_factory=dict)
 
 

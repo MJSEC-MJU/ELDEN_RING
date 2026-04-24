@@ -1,0 +1,102 @@
+# ============================================================
+# Phase 4 — Governance orchestrator Deployment
+# Drives A (policy gate) → B (git PR) → C (promotion gate).
+# Reads Phase 3 result ConfigMaps from elden-staging,
+# subscribes to Redis channel elden:phase4:promote.
+# ============================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: governance-secrets
+  namespace: elden-governance
+  labels:
+    elden-ring/plane: governance
+type: Opaque
+stringData:
+  GOV_GITHUB_TOKEN: ""        # injected by Harness/ArgoCD from vault
+  GOV_ARGOCD_TOKEN: ""
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: governance-controller
+  namespace: elden-governance
+  labels:
+    app: governance-controller
+    elden-ring/plane: governance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: governance-controller
+  template:
+    metadata:
+      labels:
+        app: governance-controller
+        elden-ring/plane: governance
+    spec:
+      serviceAccountName: governance-sa
+      containers:
+        - name: controller
+          image: ghcr.io/mjsec-mju/elden-governance:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: GOV_REDIS_URL
+              value: redis://redis-master.elden-monitoring:6379/0
+            - name: GOV_PROMETHEUS_URL
+              value: http://prometheus-kube-prometheus-prometheus.elden-monitoring:9090
+            - name: GOV_GITHUB_REPO
+              value: MJSEC-MJU/ELDEN_RING
+            - name: GOV_BASE_BRANCH
+              value: dev
+            - name: GOV_CANARY_ERROR_RATE_THRESHOLD
+              value: "0.05"
+            - name: GOV_CANARY_LATENCY_P99_MS_THRESHOLD
+              value: "1000"
+          envFrom:
+            - secretRef:
+                name: governance-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: governance-controller
+  namespace: elden-governance
+  labels:
+    app: governance-controller
+    elden-ring/plane: governance
+spec:
+  selector:
+    app: governance-controller
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
