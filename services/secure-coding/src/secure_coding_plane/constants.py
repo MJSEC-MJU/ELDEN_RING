@@ -1,0 +1,2 @@
+SUPPORTED_CWE = {"CWE-89", "CWE-79", "CWE-22"}
+
