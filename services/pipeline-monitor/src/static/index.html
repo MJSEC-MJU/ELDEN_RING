@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>ELDEN RING — Pipeline Monitor</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+  body { background: linear-gradient(180deg,#020617 0%,#0f172a 100%); color:#e2e8f0;
+         font-family:'Pretendard','Inter',system-ui,sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; border-radius:12px; }
+  .card-title { font-size:11px; letter-spacing:0.12em; color:#94a3b8; text-transform:uppercase; font-weight:700; }
+
+  /* nodes */
+  .pnode { border:2px solid; border-radius:14px; padding:14px 16px; background:linear-gradient(180deg,#1e293b,#0f172a);
+           box-shadow:0 6px 20px rgba(0,0,0,0.55); transition:all 0.25s ease; }
+  .pnode .pnode-title { font-size:18px; font-weight:700; color:#e2e8f0; }
+  .pnode .pnode-tag   { font-size:11px; color:#22d3ee; font-weight:600; letter-spacing:0.08em; }
+  .pnode .pnode-sub   { font-size:11px; color:#94a3b8; margin-top:4px; }
+  .pnode .pnode-state { font-size:11px; margin-top:6px; padding:4px 8px; border-radius:6px; display:inline-block;
+                        background:rgba(100,116,139,0.18); color:#cbd5e1; }
+  .pnode-idle    { border-color:#334155; }
+  .pnode-active  { border-color:#fbbf24; box-shadow:0 0 28px rgba(251,191,36,0.6); transform:scale(1.03); }
+  .pnode-active  .pnode-state { background:rgba(251,191,36,0.2); color:#fde68a; }
+  .pnode-recent  { border-color:#22c55e; box-shadow:0 0 22px rgba(34,197,94,0.45); }
+  .pnode-recent  .pnode-state { background:rgba(34,197,94,0.2); color:#86efac; }
+  .pnode-rejected{ border-color:#ef4444; box-shadow:0 0 22px rgba(239,68,68,0.5); }
+  .pnode-rejected .pnode-state { background:rgba(239,68,68,0.2); color:#fca5a5; }
+  .pulse { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+
+  /* edges */
+  .edge   { stroke:#475569; stroke-width:2.5; fill:none; marker-end:url(#arrow); }
+  .edge.flow { stroke:#22d3ee; stroke-dasharray:10 6; animation: dash 0.5s linear infinite; stroke-width:3; marker-end:url(#arrow-flow); }
+  .edge.retry { stroke:#fb923c; stroke-width:2; stroke-dasharray:4 4; }
+  @keyframes dash { to { stroke-dashoffset:-32; } }
+
+  /* badges */
+  .badge { padding:3px 10px; border-radius:9999px; font-size:11px; font-weight:700; letter-spacing:0.04em; }
+  .b-low{background:#16a34a;color:#fff;} .b-medium{background:#ca8a04;color:#fff;} .b-high{background:#dc2626;color:#fff;} .b-critical{background:#7c2d12;color:#fff;}
+  .b-passed{background:#16a34a;color:#fff;} .b-failed{background:#dc2626;color:#fff;} .b-pending{background:#64748b;color:#fff;}
+
+  .tab-btn { padding:10px 18px; border-bottom:3px solid transparent; cursor:pointer; font-weight:600; color:#94a3b8; transition:all 0.15s; }
+  .tab-btn:hover { color:#e2e8f0; }
+  .tab-btn.active { border-color:#22d3ee; color:#22d3ee; }
+
+  pre.json { background:#020617; color:#cbd5e1; padding:10px; border-radius:8px; font-size:11px; max-height:240px; overflow:auto; }
+  .scroll-y { overflow-y:auto; }
+
+  .btn { padding:8px 14px; border-radius:8px; font-weight:600; font-size:13px; transition:all 0.15s; cursor:pointer; }
+  .btn-primary { background:#0891b2; color:white; }
+  .btn-primary:hover { background:#06b6d4; }
+  .btn-secondary { background:#334155; color:#e2e8f0; }
+  .btn-secondary:hover { background:#475569; }
+  .btn-danger { background:#b91c1c; color:white; }
+  .btn-danger:hover { background:#dc2626; }
+  .llm-select { background:#0f172a; border:1px solid #334155; border-radius:8px; color:#e2e8f0; font-size:12px; padding:8px 28px 8px 10px; }
+  .llm-pill { display:inline-flex; align-items:center; gap:6px; border:1px solid #334155; border-radius:9999px; padding:6px 10px; font-size:12px; color:#cbd5e1; background:#0f172a; min-width:128px; justify-content:center; }
+  .llm-dot { width:8px; height:8px; border-radius:9999px; background:#64748b; display:inline-block; }
+  .llm-dot.ok { background:#22c55e; }
+  .llm-dot.warn { background:#f59e0b; }
+  .llm-dot.err { background:#ef4444; }
+
+  /* LLM telemetry HUD — proves the codex/claude CLI was *really* invoked */
+  .llm-tele { display:flex; align-items:center; gap:8px; border:1px solid #334155; border-radius:10px;
+              padding:6px 12px; font-size:12px; background:linear-gradient(180deg,#0f172a,#020617);
+              color:#cbd5e1; min-width:240px; }
+  .llm-tele.idle    { border-color:#334155; }
+  .llm-tele.running { border-color:#22d3ee; box-shadow:0 0 14px rgba(34,211,238,0.45); }
+  .llm-tele.success { border-color:#22c55e; }
+  .llm-tele.failure { border-color:#ef4444; }
+  .llm-tele .tele-label { font-size:10px; letter-spacing:0.1em; color:#64748b; text-transform:uppercase; font-weight:700; }
+  .llm-tele .tele-meta  { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:#e2e8f0; }
+  .llm-tele .tele-fix   { font-size:11px; color:#86efac; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .llm-tele.failure .tele-fix { color:#fca5a5; }
+  .live-dot { width:9px; height:9px; border-radius:9999px; display:inline-block; background:#22d3ee;
+              box-shadow:0 0 0 0 rgba(34,211,238,0.7); animation: liveBeat 1.1s ease-in-out infinite; }
+  @keyframes liveBeat {
+    0%   { box-shadow:0 0 0 0 rgba(34,211,238,0.65); transform:scale(1); }
+    70%  { box-shadow:0 0 0 9px rgba(34,211,238,0);  transform:scale(1.18); }
+    100% { box-shadow:0 0 0 0 rgba(34,211,238,0);    transform:scale(1); }
+  }
+
+  /* REAL LLM stamp visible on Phase 2 node + modal */
+  .real-llm-stamp { display:inline-flex; align-items:center; gap:6px; border:1px solid #22c55e;
+                    color:#86efac; background:rgba(34,197,94,0.12); border-radius:6px;
+                    padding:2px 8px; font-size:10px; font-weight:700; letter-spacing:0.08em;
+                    text-transform:uppercase; }
+  .real-llm-stamp::before { content:""; width:6px; height:6px; border-radius:9999px; background:#22c55e; }
+  .replay-stamp  { display:inline-flex; align-items:center; gap:6px; border:1px solid #f59e0b;
+                   color:#fcd34d; background:rgba(245,158,11,0.12); border-radius:6px;
+                   padding:2px 8px; font-size:10px; font-weight:700; letter-spacing:0.08em;
+                   text-transform:uppercase; }
+
+  .stat-card { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:18px; }
+  .stat-num  { font-size:36px; font-weight:800; line-height:1; }
+  .stat-label{ font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:6px; }
+
+  .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px;
+                 color:#64748b; text-align:center; }
+  .empty-icon { font-size:48px; opacity:0.4; margin-bottom:12px; }
+</style>
+</head>
+<body class="h-screen flex flex-col">
+
+<header class="px-6 py-3 border-b border-slate-700 flex items-center justify-between bg-slate-900/60 backdrop-blur">
+  <div class="flex items-center gap-4">
+    <div class="text-2xl font-bold text-cyan-400">⚔ ELDEN RING</div>
+    <div class="text-slate-400 text-sm">Pipeline Monitor</div>
+    <div class="text-slate-500 text-xs hidden md:block">| 4-Phase 자동 방어 파이프라인</div>
+  </div>
+  <div class="flex items-center gap-4 text-sm">
+    <div id="llm-tele" class="llm-tele idle" title="실제 codex/claude CLI 호출 텔레메트리">
+      <span class="tele-label">LLM</span>
+      <span id="llm-tele-state" class="tele-meta">idle</span>
+      <span id="llm-tele-fix"   class="tele-fix"></span>
+    </div>
+    <div id="conn" class="flex items-center gap-2 text-slate-400">
+      <span class="w-2 h-2 rounded-full bg-slate-500"></span><span>connecting…</span>
+    </div>
+    <div class="text-slate-400">incidents <span id="hdr-incidents" class="text-white font-bold">0</span></div>
+    <div class="text-slate-400">events <span id="hdr-events" class="text-white font-bold">0</span></div>
+  </div>
+</header>
+
+<nav class="px-6 border-b border-slate-700 flex justify-between bg-slate-900/30">
+  <div class="flex gap-1">
+    <div class="tab-btn active" data-tab="pipeline">Live Pipeline</div>
+    <div class="tab-btn" data-tab="incidents">Incidents</div>
+    <div class="tab-btn" data-tab="stats">Stats</div>
+  </div>
+  <div class="flex items-center gap-2 py-2 flex-wrap justify-end">
+    <span class="text-xs text-slate-500">LLM OAuth:</span>
+    <select id="llm-provider" class="llm-select" onchange="refreshLlmStatus()">
+      <option value="codex">Codex</option>
+      <option value="claude">Claude</option>
+    </select>
+    <span id="llm-status" class="llm-pill"><span class="llm-dot"></span><span>checking</span></span>
+    <button class="btn btn-primary" onclick="startLlmLogin()">OAuth Login</button>
+    <button class="btn btn-secondary" onclick="runLlmSimulation()">LLM Smoke</button>
+    <span class="text-xs text-slate-500 ml-2">시연용 attack 주입:</span>
+    <button class="btn btn-danger" onclick="inject('sqli')">⚔ SQL Injection</button>
+    <button class="btn btn-secondary" onclick="inject('xss')">XSS</button>
+    <button class="btn btn-secondary" onclick="inject('path')">Path Traversal</button>
+  </div>
+</nav>
+
+<main class="flex-1 overflow-hidden">
+
+  <!-- TAB 1: PIPELINE -->
+  <section id="tab-pipeline" class="h-full grid grid-cols-12 gap-4 p-4">
+    <div class="col-span-8 card p-5 relative flex flex-col">
+      <div class="flex items-center justify-between mb-3">
+        <div class="card-title">Live Flow</div>
+        <div class="text-xs text-slate-500">메시지가 채널을 통과할 때 노드와 엣지가 실시간으로 반응합니다</div>
+      </div>
+      <div class="flex-1 relative">
+        <svg id="flow-svg" viewBox="0 0 1100 540" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+            </marker>
+            <marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#22d3ee"/>
+            </marker>
+          </defs>
+
+          <!-- edges -->
+          <path id="e12" class="edge" d="M 270 130 C 380 130 380 130 480 130" />
+          <path id="e23" class="edge" d="M 700 130 C 810 130 810 130 920 130" />
+          <path id="e34" class="edge" d="M 1015 175 C 1015 285 1015 285 1015 360" />
+          <path id="e2r" class="edge retry" d="M 590 175 C 590 280 270 280 270 175" />
+
+          <!-- channel labels -->
+          <text x="375" y="118" class="text-[12px] font-mono" fill="#22d3ee">elden:phase2:context</text>
+          <text x="800" y="118" class="text-[12px] font-mono" fill="#22d3ee">elden:phase3:validate</text>
+          <text x="1025" y="270" class="text-[12px] font-mono" fill="#22d3ee">elden:phase4:promote</text>
+          <text x="380" y="295" class="text-[12px] font-mono" fill="#fb923c">elden:phase2:retry (실패 시)</text>
+
+          <!-- nodes -->
+          <foreignObject x="60" y="60" width="220" height="130">
+            <div xmlns="http://www.w3.org/1999/xhtml" id="node-p1" class="pnode pnode-idle">
+              <div class="pnode-tag">⚔ PHASE 1</div>
+              <div class="pnode-title">Runtime Defense</div>
+              <div class="pnode-sub">Falco + ModSecurity WAF</div>
+              <div class="pnode-sub mt-1 font-mono">elden-production</div>
+              <div id="ev-p1" class="pnode-state">idle</div>
+            </div>
+          </foreignObject>
+
+          <foreignObject x="480" y="60" width="220" height="150">
+            <div xmlns="http://www.w3.org/1999/xhtml" id="node-p2" class="pnode pnode-idle">
+              <div class="flex items-center justify-between">
+                <div class="pnode-tag">🔧 PHASE 2</div>
+                <span id="p2-real-stamp" class="real-llm-stamp" style="display:none">REAL LLM</span>
+              </div>
+              <div class="pnode-title">Secure Coding</div>
+              <div class="pnode-sub">LLM patch + image build</div>
+              <div class="pnode-sub mt-1 font-mono">elden-secure-coding</div>
+              <div id="ev-p2" class="pnode-state">idle</div>
+            </div>
+          </foreignObject>
+
+          <foreignObject x="900" y="60" width="220" height="130">
+            <div xmlns="http://www.w3.org/1999/xhtml" id="node-p3" class="pnode pnode-idle">
+              <div class="pnode-tag">🛡 PHASE 3</div>
+              <div class="pnode-title">Recovery Assurance</div>
+              <div class="pnode-sub">exploit / regression / SLO</div>
+              <div class="pnode-sub mt-1 font-mono">elden-staging</div>
+              <div id="ev-p3" class="pnode-state">idle</div>
+            </div>
+          </foreignObject>
+
+          <foreignObject x="900" y="360" width="220" height="140">
+            <div xmlns="http://www.w3.org/1999/xhtml" id="node-p4" class="pnode pnode-idle">
+              <div class="pnode-tag">⚖ PHASE 4</div>
+              <div class="pnode-title">Governance</div>
+              <div class="pnode-sub">Kyverno · ArgoCD · Rollouts</div>
+              <div class="pnode-sub mt-1 font-mono">elden-governance</div>
+              <div id="ev-p4" class="pnode-state">idle</div>
+            </div>
+          </foreignObject>
+
+          <!-- redis broker icon -->
+          <foreignObject x="430" y="430" width="240" height="80">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="card p-3 text-center">
+              <div class="text-xs text-slate-400">Message Broker</div>
+              <div class="font-bold text-rose-400">Redis Pub/Sub + List</div>
+              <div class="text-[10px] text-slate-500 font-mono">redis-master.elden-monitoring:6379</div>
+            </div>
+          </foreignObject>
+        </svg>
+      </div>
+    </div>
+
+    <aside class="col-span-4 card p-5 flex flex-col">
+      <div class="flex items-center justify-between mb-3">
+        <div class="card-title">Live Events</div>
+        <div id="ev-count" class="text-xs text-slate-500">0 events</div>
+      </div>
+      <div id="event-log" class="flex-1 scroll-y space-y-2 text-sm pr-1"></div>
+      <div id="event-empty" class="empty-state hidden">
+        <div class="empty-icon">📡</div>
+        <div class="font-semibold mb-1">아직 이벤트가 없습니다</div>
+        <div class="text-xs">상단의 attack 버튼을 눌러보세요</div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- TAB 2: INCIDENTS -->
+  <section id="tab-incidents" class="h-full p-4 hidden">
+    <div class="card p-5 h-full flex flex-col">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <div class="card-title">Incidents</div>
+          <div class="text-xs text-slate-500 mt-1">행을 클릭하면 Phase 1~4 전체 결과를 한 화면에서 볼 수 있습니다</div>
+        </div>
+        <div class="text-xs text-slate-500">최신순</div>
+      </div>
+      <div class="overflow-auto flex-1">
+        <table class="w-full text-sm">
+          <thead class="text-slate-400 text-xs uppercase border-b border-slate-700 sticky top-0 bg-slate-800">
+            <tr>
+              <th class="text-left py-2 px-3">Incident</th>
+              <th class="text-left">CWE</th>
+              <th class="text-left">Severity</th>
+              <th class="text-left">Risk</th>
+              <th class="text-left">Stage</th>
+              <th class="text-left">Branch</th>
+              <th class="text-left">Started</th>
+            </tr>
+          </thead>
+          <tbody id="incident-rows"></tbody>
+        </table>
+        <div id="incident-empty" class="empty-state hidden">
+          <div class="empty-icon">🔍</div>
+          <div class="font-semibold mb-1">아직 incident 가 없습니다</div>
+          <div class="text-xs">상단의 attack 버튼으로 첫 시연을 시작해보세요</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 3: STATS -->
+  <section id="tab-stats" class="h-full p-4 hidden grid grid-cols-12 gap-4 grid-rows-[auto,1fr]">
+    <div class="col-span-3 stat-card">
+      <div class="stat-label">Total Incidents</div>
+      <div id="s-total" class="stat-num">0</div>
+    </div>
+    <div class="col-span-3 stat-card">
+      <div class="stat-label">Total Events</div>
+      <div id="s-events" class="stat-num">0</div>
+    </div>
+    <div class="col-span-3 stat-card">
+      <div class="stat-label">High-Risk</div>
+      <div id="s-high" class="stat-num text-red-400">0</div>
+    </div>
+    <div class="col-span-3 stat-card">
+      <div class="stat-label">Awaiting Approval</div>
+      <div id="s-pending" class="stat-num text-yellow-400">0</div>
+    </div>
+    <div class="col-span-6 card p-5">
+      <div class="card-title mb-3">Incidents by CWE</div>
+      <div class="h-[calc(100%-30px)]"><canvas id="chart-cwe"></canvas></div>
+    </div>
+    <div class="col-span-6 card p-5">
+      <div class="card-title mb-3">Incidents by Risk</div>
+      <div class="h-[calc(100%-30px)]"><canvas id="chart-risk"></canvas></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-6 right-6 hidden bg-slate-900 border border-cyan-500 rounded-lg px-4 py-3 z-40 shadow-2xl"></div>
+
+<!-- LLM OAuth panel -->
+<div id="llm-panel" class="fixed bottom-6 left-6 hidden bg-slate-900 border border-slate-700 rounded-xl w-[520px] max-w-[calc(100vw-3rem)] z-40 shadow-2xl overflow-hidden">
+  <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between bg-slate-800">
+    <div>
+      <div class="text-xs text-slate-400 font-mono">LLM OAuth</div>
+      <div id="llm-panel-title" class="font-bold text-cyan-300">session</div>
+    </div>
+    <button class="text-slate-400 hover:text-white text-xl leading-none" onclick="hideLlmPanel()">×</button>
+  </div>
+  <div id="llm-auth-hints" class="hidden p-4 border-b border-slate-700 bg-slate-900/95 space-y-3">
+    <div>
+      <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Login Link</div>
+      <a id="llm-auth-link" href="#" target="_blank" rel="noopener noreferrer" class="text-cyan-300 hover:text-cyan-200 underline break-all text-sm"></a>
+    </div>
+    <div id="llm-auth-code-row">
+      <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-1">One-Time Code (enter on auth page)</div>
+      <div class="flex items-center gap-2">
+        <code id="llm-auth-code" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-lg text-orange-300 tracking-wide flex-1"></code>
+        <button class="btn btn-secondary shrink-0" onclick="copyLlmCode()">Copy Code</button>
+      </div>
+      <div class="text-[11px] text-slate-500 mt-2">Use this only in the official auth page.</div>
+    </div>
+  </div>
+  <!-- Claude OAuth paste-back. The CLI binds a *loopback* HTTP listener at
+       [::1]:RANDOM/callback when login starts; the user's browser can't reach
+       it across a pod boundary, so platform.claude.com falls back to "paste this
+       code into Claude Code". We accept that paste here, parse <code>#<state>
+       (or the full URL) and forward GET /callback?code=…&state=… inside the pod
+       on the user's behalf. See _forward_to_local_callback in llm_oauth.py. -->
+  <div id="llm-auth-claude-notice" class="hidden p-4 border-b border-slate-700 bg-slate-900/95 space-y-2">
+    <div class="text-[11px] uppercase tracking-wide text-amber-400 mb-1 flex items-center gap-2">
+      <span class="live-dot" style="background:#f59e0b;box-shadow:0 0 0 0 rgba(245,158,11,0.7)"></span>
+      Claude OAuth — paste authorization code
+    </div>
+    <div class="text-[11px] text-slate-400 leading-relaxed">
+      위 링크에서 로그인 + Approve 하면 <span class="font-mono text-cyan-300">platform.claude.com/oauth/code/callback</span> 페이지에
+      <b>인증 코드</b>(<span class="font-mono text-slate-300">code#state</span> 형식)가 표시돼요. 그걸 통째로 복사해서 아래에 붙여넣고 <b>Submit</b>.
+      또는 콜백 URL 전체를 그대로 붙여넣어도 됩니다.
+    </div>
+    <div class="flex items-center gap-2">
+      <input id="llm-auth-paste-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="code#state  또는  https://platform.claude.com/oauth/code/callback?code=…&state=…"
+             class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-400 focus:outline-none" />
+      <button class="btn btn-primary shrink-0" onclick="submitLlmAuthCode()">Submit</button>
+    </div>
+    <div id="llm-auth-paste-msg" class="text-[11px] text-slate-500"></div>
+    <div class="flex items-center gap-2 pt-1">
+      <button class="btn btn-secondary shrink-0" onclick="cancelLlmLogin()">Cancel login</button>
+      <span id="llm-auth-cancel-msg" class="text-[11px] text-slate-500"></span>
+    </div>
+  </div>
+  <pre id="llm-output" class="bg-slate-950 text-slate-200 text-xs p-4 max-h-72 overflow-auto whitespace-pre-wrap"></pre>
+</div>
+
+<!-- Detail modal -->
+<div id="modal" class="fixed inset-0 bg-black/75 hidden items-center justify-center p-6 z-50 backdrop-blur">
+  <div class="bg-slate-900 rounded-xl border border-slate-700 max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+    <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center bg-slate-800">
+      <div>
+        <div class="text-xs text-slate-400 font-mono">incident</div>
+        <div id="m-title" class="text-xl font-bold text-cyan-400 font-mono">—</div>
+      </div>
+      <button id="m-close" class="text-slate-400 hover:text-white text-3xl leading-none">×</button>
+    </div>
+    <div id="m-body" class="overflow-auto p-6 space-y-4"></div>
+  </div>
+</div>
+
+<script>
+const Q = (s)=>document.querySelector(s);
+const QA= (s)=>document.querySelectorAll(s);
+const STATE = { incidents:[], events:[], stats:{} };
+
+// ---- toast ----
+function toast(msg, kind='info') {
+  const t = Q('#toast');
+  const color = kind==='error'?'border-red-500':kind==='success'?'border-emerald-500':'border-cyan-500';
+  t.className = `fixed bottom-6 right-6 bg-slate-900 border rounded-lg px-4 py-3 z-40 shadow-2xl ${color}`;
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(window._toastT);
+  window._toastT = setTimeout(()=>t.classList.add('hidden'), 3500);
+}
+
+// ---- LLM OAuth + smoke ----
+const LLM = { status:null, loginSession:null, pollTimer:null, telemetry:null, teleTickTimer:null };
+
+// Render the live "real LLM call" telemetry HUD in the header.
+// `running` -> animated pulse + Phase 2 node tagged REAL LLM
+// `success` -> green border + provider/duration/security_fix
+// `failure` -> red border + error
+function renderLlmTelemetry(t) {
+  if (!t) return;
+  LLM.telemetry = t;
+  const root  = Q('#llm-tele');
+  const state = Q('#llm-tele-state');
+  const fix   = Q('#llm-tele-fix');
+  const stamp = Q('#p2-real-stamp');
+  root.classList.remove('idle','running','success','failure');
+  root.classList.add(t.status || 'idle');
+
+  const provider = t.provider || '—';
+  const duration = t.duration_ms != null ? `${(t.duration_ms/1000).toFixed(1)}s` : null;
+
+  if (t.status === 'running') {
+    state.innerHTML = `<span class="live-dot"></span>&nbsp; <b>${provider}</b> · CLI invoking…`;
+    fix.textContent = '';
+    stamp.style.display = 'inline-flex';
+    stamp.textContent = 'REAL LLM · running';
+    if (LLM.teleTickTimer) clearInterval(LLM.teleTickTimer);
+    LLM.teleTickTimer = setInterval(()=>{
+      if (!LLM.telemetry || LLM.telemetry.status !== 'running' || !LLM.telemetry.started_at) return;
+      const elapsed = (Date.now()/1000 - LLM.telemetry.started_at);
+      state.innerHTML = `<span class="live-dot"></span>&nbsp; <b>${provider}</b> · ${elapsed.toFixed(1)}s`;
+    }, 200);
+  } else if (t.status === 'success') {
+    if (LLM.teleTickTimer) { clearInterval(LLM.teleTickTimer); LLM.teleTickTimer = null; }
+    state.innerHTML = `✓ <b>${provider}</b> · ${duration||'—'}`;
+    fix.textContent = t.security_fix ? `fix: ${t.security_fix}` : '';
+    fix.title = t.security_fix || '';
+    stamp.style.display = 'inline-flex';
+    stamp.textContent = `REAL LLM · ${duration||'ok'}`;
+  } else if (t.status === 'failure') {
+    if (LLM.teleTickTimer) { clearInterval(LLM.teleTickTimer); LLM.teleTickTimer = null; }
+    state.innerHTML = `✗ <b>${provider}</b> failed`;
+    fix.textContent = t.error ? t.error.slice(0, 80) : '';
+    fix.title = t.error || '';
+    stamp.style.display = 'none';
+  } else {
+    if (LLM.teleTickTimer) { clearInterval(LLM.teleTickTimer); LLM.teleTickTimer = null; }
+    state.textContent = 'idle';
+    fix.textContent = '';
+    stamp.style.display = 'none';
+  }
+}
+
+function selectedLlmProvider() {
+  return Q('#llm-provider').value || 'codex';
+}
+
+function setLlmStatus(kind, text) {
+  const el = Q('#llm-status');
+  const dotClass = kind === 'ok' ? 'ok' : kind === 'warn' ? 'warn' : kind === 'err' ? 'err' : '';
+  el.innerHTML = `<span class="llm-dot ${dotClass}"></span><span>${text}</span>`;
+}
+
+function currentProviderStatus() {
+  const provider = selectedLlmProvider();
+  return (LLM.status && LLM.status.providers && LLM.status.providers[provider]) || null;
+}
+
+async function refreshLlmStatus() {
+  setLlmStatus('', 'checking');
+  try {
+    const r = await fetch('/api/llm/status');
+    const d = await r.json();
+    LLM.status = d;
+    const p = currentProviderStatus();
+    if (!p || !p.available) setLlmStatus('err', 'CLI missing');
+    else if (p.authenticated) setLlmStatus('ok', 'OAuth ready');
+    else setLlmStatus('warn', 'login needed');
+  } catch (e) {
+    setLlmStatus('err', 'status error');
+  }
+}
+
+function showLlmPanel(title, output) {
+  Q('#llm-panel-title').textContent = title;
+  Q('#llm-output').textContent = output || '';
+  updateLlmAuthHints(output || '', null);
+  Q('#llm-panel').classList.remove('hidden');
+}
+
+function hideLlmPanel() {
+  Q('#llm-panel').classList.add('hidden');
+}
+window.hideLlmPanel = hideLlmPanel;
+
+function updateLlmAuthHints(output, sessionInfo) {
+  const panel = Q('#llm-auth-hints');
+  const codeRow = Q('#llm-auth-code-row');
+  const claudeNotice = Q('#llm-auth-claude-notice');
+
+  const link = (output.match(/https:\/\/auth\.openai\.com\/codex\/device|https:\/\/[^\s]+\/[^\s]*/i) || [])[0];
+  const oneTime = (output.match(/\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/) || [])[0];
+
+  if (link || oneTime) {
+    panel.classList.remove('hidden');
+    if (link) { Q('#llm-auth-link').href = link; Q('#llm-auth-link').textContent = link; }
+    if (oneTime) { codeRow.classList.remove('hidden'); Q('#llm-auth-code').textContent = oneTime; }
+    else         { codeRow.classList.add('hidden'); Q('#llm-auth-code').textContent = ''; }
+  } else {
+    panel.classList.add('hidden');
+    Q('#llm-auth-link').textContent = '';
+    Q('#llm-auth-link').removeAttribute('href');
+    Q('#llm-auth-code').textContent = '';
+  }
+
+  // Claude notice: `claude auth login` doesn't accept paste-back from stdin/PTY
+  // (verified empirically). Show an explainer + Cancel button instead of a paste form.
+  const isClaudeRunning = !!(sessionInfo && sessionInfo.provider === 'claude' &&
+                             sessionInfo.status === 'running');
+  if (isClaudeRunning) {
+    claudeNotice.classList.remove('hidden');
+  } else {
+    claudeNotice.classList.add('hidden');
+    Q('#llm-auth-cancel-msg').textContent = '';
+  }
+}
+
+async function cancelLlmLogin() {
+  if (!LLM.loginSession) { toast('No active OAuth session', 'error'); return; }
+  const sid = LLM.loginSession;
+  Q('#llm-auth-cancel-msg').textContent = 'cancelling…';
+  try {
+    const r = await fetch(`/api/llm/login/${sid}/cancel`, { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      Q('#llm-auth-cancel-msg').textContent = d.error || 'cancel failed';
+      toast(`Cancel failed: ${d.error||'unknown'}`, 'error');
+      return;
+    }
+    Q('#llm-auth-cancel-msg').textContent = 'cancelled';
+    clearInterval(LLM.pollTimer);
+    await refreshLlmStatus();
+    toast('OAuth login cancelled', 'success');
+  } catch (e) {
+    Q('#llm-auth-cancel-msg').textContent = e.message;
+    toast(`Cancel failed: ${e.message}`, 'error');
+  }
+}
+window.cancelLlmLogin = cancelLlmLogin;
+
+async function submitLlmAuthCode() {
+  if (!LLM.loginSession) { toast('No active OAuth session', 'error'); return; }
+  const input = Q('#llm-auth-paste-input');
+  const code = (input.value || '').trim();
+  if (!code) { toast('Paste the code#state value first', 'error'); return; }
+  Q('#llm-auth-paste-msg').textContent = 'forwarding to claude listener…';
+  try {
+    const r = await fetch(`/api/llm/login/${LLM.loginSession}/code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      Q('#llm-auth-paste-msg').textContent = d.error || 'submit failed';
+      toast(`Submit failed: ${d.error||'unknown'}`, 'error');
+      return;
+    }
+    input.value = '';
+    const httpInfo = d.callback_http ? ` (port=${d.callback_port}, http=${d.callback_http})` : '';
+    Q('#llm-auth-paste-msg').textContent = `delivered to claude callback${httpInfo}; waiting for token exchange…`;
+    toast('OAuth code forwarded to Claude CLI', 'success');
+  } catch (e) {
+    Q('#llm-auth-paste-msg').textContent = e.message;
+    toast(`Submit failed: ${e.message}`, 'error');
+  }
+}
+window.submitLlmAuthCode = submitLlmAuthCode;
+
+async function copyLlmCode() {
+  const code = Q('#llm-auth-code').textContent.trim();
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    toast('OAuth code copied', 'success');
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = code;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast('OAuth code copied', 'success');
+  }
+}
+window.copyLlmCode = copyLlmCode;
+
+async function startLlmLogin() {
+  const provider = selectedLlmProvider();
+  toast(`${provider} OAuth login starting...`);
+  try {
+    const r = await fetch(`/api/llm/login?provider=${provider}`, {method:'POST'});
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      toast(`OAuth login unavailable: ${d.error||'unknown'}`, 'error');
+      showLlmPanel(`${provider} OAuth`, d.error || 'OAuth login unavailable');
+      return;
+    }
+    if (d.status === 'already_authenticated') {
+      toast(`${provider} OAuth already ready`, 'success');
+      showLlmPanel(`${provider} OAuth`, d.output || 'Already authenticated');
+      await refreshLlmStatus();
+      return;
+    }
+    LLM.loginSession = d.session_id;
+    setLlmStatus('warn', 'waiting auth');
+    showLlmPanel(`${provider} OAuth`, `Started: ${d.command}\n\nWaiting for device/browser auth output...`);
+    clearInterval(LLM.pollTimer);
+    LLM.pollTimer = setInterval(()=>pollLlmLogin(d.session_id), 1500);
+    pollLlmLogin(d.session_id);
+  } catch (e) {
+    toast(`OAuth login failed: ${e.message}`, 'error');
+  }
+}
+window.startLlmLogin = startLlmLogin;
+
+async function pollLlmLogin(sessionId) {
+  try {
+    const r = await fetch(`/api/llm/login/${sessionId}`);
+    const d = await r.json();
+    Q('#llm-output').textContent = d.output || '(waiting for CLI output)';
+    updateLlmAuthHints(d.output || '', d);
+    if (d.status === 'running') setLlmStatus('warn', d.awaiting_code && !d.submitted_code ? 'paste code' : 'waiting auth');
+    if (d.status && d.status !== 'running') {
+      clearInterval(LLM.pollTimer);
+      await refreshLlmStatus();
+      toast(d.status === 'completed' ? 'OAuth login completed' : `OAuth login ${d.status}`, d.status === 'completed' ? 'success' : 'error');
+    }
+  } catch (e) {
+    clearInterval(LLM.pollTimer);
+    toast(`OAuth poll failed: ${e.message}`, 'error');
+  }
+}
+
+async function runLlmSimulation() {
+  const provider = selectedLlmProvider();
+  toast(`${provider} LLM patch smoke running...`);
+  setNode('p2','active','LLM patching...');
+  try {
+    const r = await fetch(`/api/llm/simulate?provider=${provider}`, {method:'POST'});
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      setNode('p2','rejected','LLM unavailable');
+      toast(`LLM smoke failed: ${d.error||'unknown'}`, 'error');
+      showLlmPanel(`${provider} LLM smoke`, d.error || 'LLM smoke failed');
+      return;
+    }
+    toast(`LLM smoke complete: ${d.patch_id}`, 'success');
+    showLlmPanel(`${provider} LLM smoke`, `incident: ${d.incident_id}\npatch: ${d.patch_id}\nfix: ${d.security_fix}\n\n${d.patched_snippet}`);
+  } catch (e) {
+    setNode('p2','rejected','LLM failed');
+    toast(`LLM smoke failed: ${e.message}`, 'error');
+  }
+}
+window.runLlmSimulation = runLlmSimulation;
+
+// ---- inject button ----
+async function inject(scenario) {
+  toast(`${scenario.toUpperCase()} attack 주입 중...`);
+  try {
+    const r = await fetch(`/api/inject?scenario=${scenario}`, {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'sent') {
+      toast(`✓ Phase 1 에 ${scenario} 주입 완료 — 화면 관찰`, 'success');
+    } else {
+      toast(`주입 실패: ${d.error||'unknown'}`, 'error');
+    }
+  } catch (e) {
+    toast(`주입 실패: ${e.message}`, 'error');
+  }
+}
+window.inject = inject;
+
+// ---- tab switching ----
+QA('.tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
+  QA('.tab-btn').forEach(b=>b.classList.toggle('active', b===btn));
+  const tab=btn.dataset.tab;
+  Q('#tab-pipeline').classList.toggle('hidden', tab!=='pipeline');
+  Q('#tab-incidents').classList.toggle('hidden', tab!=='incidents');
+  Q('#tab-stats').classList.toggle('hidden', tab!=='stats');
+  if (tab==='stats') renderCharts();
+}));
+
+// ---- node helpers ----
+function setNode(id, status, summary) {
+  const el = document.getElementById(`node-${id}`);
+  el.classList.remove('pnode-idle','pnode-active','pnode-recent','pnode-rejected','pulse');
+  el.classList.add(`pnode-${status}`);
+  if (status==='active') el.classList.add('pulse');
+  document.getElementById(`ev-${id}`).textContent = summary || status;
+}
+function flowEdge(id) {
+  const e = document.getElementById(id);
+  if (!e) return;
+  e.classList.add('flow');
+  setTimeout(()=>e.classList.remove('flow'), 1800);
+}
+
+function react(channel, summary) {
+  if (channel==='elden:phase2:context')   { setNode('p1','recent',summary); flowEdge('e12'); setNode('p2','active','processing…'); }
+  else if (channel==='elden:phase3:validate'){ setNode('p2','recent',summary); flowEdge('e23'); setNode('p3','active','processing…'); }
+  else if (channel==='elden:phase4:promote') { setNode('p3','recent',summary); flowEdge('e34'); setNode('p4','active','governance…'); setTimeout(()=>setNode('p4','recent',summary),1800); }
+  else if (channel==='elden:phase2:retry')   { setNode('p4','rejected',summary); flowEdge('e2r'); }
+}
+
+// ---- event log ----
+function refreshEventLog() {
+  const log = Q('#event-log');
+  const empty = Q('#event-empty');
+  Q('#ev-count').textContent = `${STATE.events.length} events`;
+  if (STATE.events.length === 0) { log.innerHTML=''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+  log.innerHTML = STATE.events.slice(0, 60).map(ev => {
+    const t = new Date(ev.ts*1000).toLocaleTimeString();
+    const phaseTag = ({'elden:phase2:context':'P1→P2','elden:phase3:validate':'P2→P3','elden:phase4:promote':'P3→P4','elden:phase2:retry':'retry'})[ev.channel] || ev.channel;
+    const isRetry = ev.channel === 'elden:phase2:retry';
+    return `<div class="border-l-2 ${isRetry?'border-orange-500':'border-cyan-500'} pl-3 py-1">
+      <div class="text-[11px] text-slate-500">${t} <span class="${isRetry?'text-orange-400':'text-cyan-400'} font-semibold">${phaseTag}</span></div>
+      <div class="text-[12px]"><span class="font-mono text-[11px] text-slate-400">${ev.incident_id||'—'}</span> <span class="text-slate-200">${ev.summary||''}</span></div>
+    </div>`;
+  }).join('');
+}
+
+function appendEvent(ev) {
+  STATE.events.unshift(ev);
+  if (STATE.events.length > 200) STATE.events.pop();
+  Q('#hdr-events').textContent = STATE.events.length;
+  refreshEventLog();
+}
+
+// ---- incidents ----
+function badge(v) { if (!v) return '<span class="text-slate-500">—</span>'; return `<span class="badge b-${v.toLowerCase()}">${v}</span>`; }
+
+function upsertIncident(inc) {
+  const idx = STATE.incidents.findIndex(i=>i.incident_id===inc.incident_id);
+  if (idx===-1) STATE.incidents.unshift(inc);
+  else STATE.incidents[idx] = {...STATE.incidents[idx], ...inc};
+  Q('#hdr-incidents').textContent = STATE.incidents.length;
+  renderIncidentTable();
+}
+
+function renderIncidentTable() {
+  const empty = Q('#incident-empty');
+  if (STATE.incidents.length === 0) {
+    Q('#incident-rows').innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  const rows = STATE.incidents.map(i=>{
+    const t = new Date(i.started_at*1000).toLocaleTimeString();
+    return `<tr class="hover:bg-slate-700/40 cursor-pointer border-b border-slate-800/60" onclick="openModal('${i.incident_id}')">
+      <td class="py-3 px-3 font-mono text-xs">${i.incident_id}</td>
+      <td>${i.cwe_id?`<span class="font-mono text-cyan-300">${i.cwe_id}</span>`:'<span class="text-slate-500">—</span>'}</td>
+      <td>${badge(i.severity)}</td>
+      <td>${badge(i.risk)}</td>
+      <td><span class="text-cyan-300 text-xs font-semibold">${i.stage||'—'}</span></td>
+      <td class="text-xs font-mono text-slate-300">${i.branch||'—'}</td>
+      <td class="text-xs text-slate-400">${t}</td>
+    </tr>`;
+  }).join('');
+  Q('#incident-rows').innerHTML = rows;
+}
+
+function openModal(incidentId) {
+  fetch('/api/incidents').then(r=>r.json()).then(list=>{
+    const inc = list.find(i=>i.incident_id===incidentId);
+    if (!inc) return;
+    Q('#m-title').textContent = inc.incident_id;
+    const p1 = inc.phase1 || {}, p1ai = p1.attack_info || {}, p1tg = p1.target || {}, p1md = p1.metadata || {};
+    const p2 = inc.phase2 || {}, p2cs = p2.change_summary || {}, p3 = inc.phase3 || {};
+    const escape = s => (s||'').toString().replace(/[<>&]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]);
+    Q('#m-body').innerHTML = `
+      <div class="grid grid-cols-3 gap-3">
+        <div class="bg-slate-800/60 rounded-lg p-3"><div class="text-xs text-slate-400 mb-1">Risk</div>${badge(inc.risk)}</div>
+        <div class="bg-slate-800/60 rounded-lg p-3"><div class="text-xs text-slate-400 mb-1">Stage</div><div class="text-cyan-300 font-semibold">${inc.stage||'—'}</div></div>
+        <div class="bg-slate-800/60 rounded-lg p-3"><div class="text-xs text-slate-400 mb-1">Branch</div><div class="font-mono text-xs">${inc.branch||'—'}</div></div>
+      </div>
+
+      <section class="bg-slate-800/60 rounded-lg p-4 border-l-4 border-cyan-500">
+        <h3 class="font-bold text-cyan-300 mb-3">⚔ Phase 1 — Runtime Defense</h3>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><span class="text-slate-400">Category:</span> <b>${p1ai.category||'—'}</b></div>
+          <div><span class="text-slate-400">CWE:</span> <span class="font-mono">${p1ai.cwe_id||'—'}</span> ${p1ai.cwe_name? '<span class="text-slate-400 text-xs">'+escape(p1ai.cwe_name)+'</span>':''}</div>
+          <div><span class="text-slate-400">OWASP:</span> ${p1ai.owasp_category||'—'}</div>
+          <div><span class="text-slate-400">Severity:</span> ${badge(p1md.severity)}</div>
+          <div class="col-span-2"><span class="text-slate-400">Endpoint:</span> <span class="font-mono">${(p1tg.endpoint||{}).method||'?'} ${(p1tg.endpoint||{}).path||'?'}</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Source mapping:</span> <span class="font-mono text-xs">${(p1tg.source_mapping||{}).file||'—'}::${(p1tg.source_mapping||{}).function||'—'} (L${(p1tg.source_mapping||{}).line_start||'?'}-${(p1tg.source_mapping||{}).line_end||'?'})</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Payload:</span> <code class="bg-slate-950 px-2 py-1 rounded text-xs text-orange-300">${escape(p1ai.payload_sample)}</code></div>
+          <div><span class="text-slate-400">Source IP:</span> <span class="font-mono">${p1ai.source_ip||'—'}</span></div>
+          <div><span class="text-slate-400">Defense:</span> ${p1md.defense_action_taken||'—'}</div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800/60 rounded-lg p-4 border-l-4 border-purple-500">
+        <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <h3 class="font-bold text-purple-300">🔧 Phase 2 — Secure Coding (Patch Generation)</h3>
+          <div class="flex items-center gap-2">
+            ${p2cs.llm_real || p2.llm_real ? '<span class="real-llm-stamp">REAL LLM CALL</span>' : ''}
+            ${p2.simulated ? '<span class="replay-stamp">build replay</span>' : ''}
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><span class="text-slate-400">Patch ID:</span> <span class="font-mono text-xs">${p2.patch_id||'—'}</span></div>
+          <div><span class="text-slate-400">Status:</span> <b>${p2.patch_status||'—'}</b></div>
+          <div class="col-span-2"><span class="text-slate-400">Target:</span> <span class="font-mono text-xs">${p2.target_file||'—'}::${p2.target_function||'—'}</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Candidate image:</span> <span class="font-mono text-xs break-all text-emerald-300">${p2.candidate_image||'—'}</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Root cause:</span> ${escape((p2.analysis_summary||{}).root_cause)||'—'}</div>
+          <div class="col-span-2"><span class="text-slate-400">Fix strategy:</span> ${escape((p2.analysis_summary||{}).fix_strategy)||'—'}</div>
+          <div><span class="text-slate-400">LLM provider:</span> <span class="font-mono text-xs text-cyan-300">${p2cs.llm_provider||'—'}</span></div>
+          <div><span class="text-slate-400">LLM duration:</span> <span class="font-mono text-xs">${p2cs.llm_duration_ms!=null?(p2cs.llm_duration_ms/1000).toFixed(1)+'s':'—'}</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Security fix:</span> ${escape(p2cs.security_fix)||'—'}</div>
+          ${p2cs.unified_diff ? `<div class="col-span-2"><span class="text-slate-400">Patch diff:</span><pre class="json mt-2">${escape(p2cs.unified_diff)}</pre></div>` : ''}
+          ${p2cs.patched_snippet ? `<div class="col-span-2"><span class="text-slate-400">Patched snippet:</span><pre class="json mt-2">${escape(p2cs.patched_snippet)}</pre></div>` : ''}
+        </div>
+      </section>
+
+      <section class="bg-slate-800/60 rounded-lg p-4 border-l-4 border-emerald-500">
+        <h3 class="font-bold text-emerald-300 mb-3">🛡 Phase 3 — Recovery Assurance (Validation)</h3>
+        <div class="flex flex-wrap gap-3 text-sm">
+          <div class="bg-slate-900/60 px-3 py-2 rounded">Exploit replay: ${badge(p3.exploit)}</div>
+          <div class="bg-slate-900/60 px-3 py-2 rounded">Regression: ${badge(p3.regression)}</div>
+          <div class="bg-slate-900/60 px-3 py-2 rounded">SLO: ${badge(p3.slo)}</div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800/60 rounded-lg p-4 border-l-4 border-orange-500">
+        <h3 class="font-bold text-orange-300 mb-3">⚖ Phase 4 — Governance Decision</h3>
+        <div class="grid grid-cols-2 gap-3 text-sm">
+          <div><span class="text-slate-400">Risk class:</span> ${badge(inc.risk)}</div>
+          <div><span class="text-slate-400">Current stage:</span> <b class="text-cyan-300">${inc.stage||'—'}</b></div>
+          <div class="col-span-2"><span class="text-slate-400">Defense branch:</span> <span class="font-mono text-xs">${inc.branch||'—'}</span></div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800/60 rounded-lg p-4">
+        <h3 class="font-bold text-slate-300 mb-2 text-sm">⏱ Timeline</h3>
+        <ul class="text-xs space-y-1 font-mono">${(inc.timeline||[]).map(t=>`<li><span class="text-slate-500">${new Date(t.ts*1000).toLocaleTimeString()}</span> &nbsp; <span class="text-cyan-400">${t.channel}</span></li>`).join('')}</ul>
+      </section>
+    `;
+    Q('#modal').classList.remove('hidden'); Q('#modal').classList.add('flex');
+  });
+}
+window.openModal = openModal;
+Q('#m-close').addEventListener('click', ()=>{ Q('#modal').classList.add('hidden'); Q('#modal').classList.remove('flex'); });
+
+// ---- charts ----
+let chartCwe, chartRisk;
+function renderCharts() {
+  const s = STATE.stats;
+  Q('#s-total').textContent  = s.total_incidents||0;
+  Q('#s-events').textContent = s.total_events||0;
+  Q('#s-high').textContent   = (s.by_risk||{}).high || 0;
+  Q('#s-pending').textContent= (s.by_stage||{}).manual_approval || 0;
+
+  const cweLabels = Object.keys(s.by_cwe||{});
+  const cweData   = Object.values(s.by_cwe||{});
+  if (chartCwe) chartCwe.destroy();
+  chartCwe = new Chart(Q('#chart-cwe').getContext('2d'), {
+    type: 'bar',
+    data: { labels: cweLabels.length?cweLabels:['—'], datasets:[{ data: cweData.length?cweData:[0], backgroundColor:'#22d3ee', borderRadius:6 }]},
+    options: { plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' } }, x:{ ticks:{ color:'#94a3b8' }, grid:{ display:false } } }, maintainAspectRatio:false }
+  });
+  const riskLabels = ['low','medium','high'];
+  const riskData = riskLabels.map(k => (s.by_risk||{})[k]||0);
+  if (chartRisk) chartRisk.destroy();
+  chartRisk = new Chart(Q('#chart-risk').getContext('2d'), {
+    type: 'doughnut',
+    data: { labels: riskLabels, datasets:[{ data: riskData, backgroundColor:['#16a34a','#ca8a04','#dc2626'], borderColor:'#0f172a', borderWidth:3 }]},
+    options: { plugins:{legend:{ labels:{ color:'#cbd5e1' } } }, maintainAspectRatio:false }
+  });
+}
+
+// ---- initial fetch (REST fallback) + WebSocket ----
+async function initialLoad() {
+  try {
+    const [inc, ev, st, tele] = await Promise.all([
+      fetch('/api/incidents').then(r=>r.json()),
+      fetch('/api/events').then(r=>r.json()),
+      fetch('/api/stats').then(r=>r.json()),
+      fetch('/api/llm/telemetry').then(r=>r.json()).catch(()=>null),
+    ]);
+    STATE.incidents = inc || [];
+    STATE.events    = (ev||[]).slice().reverse();  // backend appends; we want newest first
+    STATE.stats     = st || {};
+    Q('#hdr-incidents').textContent = STATE.incidents.length;
+    Q('#hdr-events').textContent    = STATE.events.length;
+    renderIncidentTable();
+    refreshEventLog();
+    if (tele) renderLlmTelemetry(tele);
+  } catch (e) { console.warn('initial load failed', e); }
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = ()=>{ Q('#conn').innerHTML='<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span class="text-emerald-400">connected</span>'; };
+  ws.onclose= ()=>{ Q('#conn').innerHTML='<span class="w-2 h-2 rounded-full bg-red-500"></span><span class="text-red-400">disconnected</span>'; setTimeout(connect, 2000); };
+  ws.onmessage = (m)=>{
+    const d = JSON.parse(m.data);
+    if (d.type === 'snapshot') {
+      STATE.incidents = d.incidents || [];
+      STATE.events = (d.events || []).slice().reverse();
+      STATE.stats = d.stats || {};
+      Q('#hdr-events').textContent = STATE.events.length;
+      Q('#hdr-incidents').textContent = STATE.incidents.length;
+      renderIncidentTable();
+      refreshEventLog();
+      if (d.llm_telemetry) renderLlmTelemetry(d.llm_telemetry);
+    } else if (d.type === 'event') {
+      appendEvent(d.event);
+      react(d.event.channel, d.event.summary);
+    } else if (d.type === 'incident_upsert') {
+      upsertIncident(d.incident);
+    } else if (d.type === 'llm_telemetry') {
+      renderLlmTelemetry(d.telemetry);
+    }
+  };
+}
+
+setInterval(()=>{
+  fetch('/api/stats').then(r=>r.json()).then(s=>{ STATE.stats = s; if (!Q('#tab-stats').classList.contains('hidden')) renderCharts(); });
+  fetch('/api/incidents').then(r=>r.json()).then(list=>{
+    STATE.incidents = list || [];
+    Q('#hdr-incidents').textContent = STATE.incidents.length;
+    renderIncidentTable();
+  });
+}, 5000);
+
+// Re-check OAuth/CLI availability periodically + when the tab regains focus,
+// so the header pill always reflects whether you can actually call the LLM right now.
+setInterval(()=>{ if (!document.hidden) refreshLlmStatus(); }, 20000);
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) refreshLlmStatus(); });
+
+initialLoad();
+refreshLlmStatus();
+connect();
+</script>
+
+</body>
+</html>
