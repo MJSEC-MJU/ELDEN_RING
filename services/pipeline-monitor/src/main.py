@@ -20,6 +20,7 @@ logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
 
 REDIS_URL = os.environ.get("MONITOR_REDIS_URL", "redis://redis-master.elden-monitoring:6379/0")
 GOV_URL = os.environ.get("MONITOR_GOVERNANCE_URL", "http://governance-controller.elden-governance:8080")
+PHASE1_URL = os.environ.get("MONITOR_PHASE1_URL", "http://runtime-defense.elden-production:8080")
 STATIC_DIR = Path(__file__).parent / "static"
 
 state = PipelineState()
@@ -84,6 +85,40 @@ async def get_events() -> JSONResponse:
 @app.get("/api/stats")
 async def get_stats() -> JSONResponse:
     return JSONResponse(state.stats())
+
+
+@app.post("/api/inject")
+async def inject_attack(scenario: str = "sqli") -> JSONResponse:
+    presets = {
+        "sqli": {
+            "attack_category": "SQL Injection",
+            "target_endpoint": {"method": "POST", "path": "/api/login"},
+            "payload_sample": "admin' OR 1=1 --",
+            "source_ip": "10.0.0.99",
+            "severity": "HIGH",
+        },
+        "xss": {
+            "attack_category": "Reflected XSS",
+            "target_endpoint": {"method": "GET", "path": "/api/search"},
+            "payload_sample": "<script>alert(1)</script>",
+            "source_ip": "192.0.2.42",
+            "severity": "MEDIUM",
+        },
+        "path": {
+            "attack_category": "Path Traversal",
+            "target_endpoint": {"method": "GET", "path": "/api/file"},
+            "payload_sample": "../../../etc/passwd",
+            "source_ip": "203.0.113.55",
+            "severity": "HIGH",
+        },
+    }
+    body = presets.get(scenario, presets["sqli"])
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(f"{PHASE1_URL}/api/v1/events/manual", json=body)
+            return JSONResponse({"status": "sent", "phase1_response": r.json(), "scenario": scenario})
+    except Exception as e:
+        return JSONResponse({"status": "error", "error": str(e), "scenario": scenario}, status_code=502)
 
 
 @app.websocket("/ws")
