@@ -30,7 +30,7 @@ spec:
       serviceAccountName: recovery-assurance-sa
       containers:
         - name: target-app
-          image: eldenring/target-app:latest-staging
+          image: ghcr.io/mjsec-mju/elden-target-app:dev-latest
           ports:
             - containerPort: 8080
               name: http

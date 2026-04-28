@@ -30,7 +30,7 @@ spec:
       serviceAccountName: governance-sa
       containers:
         - name: target-app
-          image: eldenring/target-app:canary
+          image: ghcr.io/mjsec-mju/elden-target-app:dev-latest
           ports:
             - containerPort: 8080
               name: http

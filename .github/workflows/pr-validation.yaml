@@ -85,7 +85,7 @@ jobs:
         if: steps.changes.outputs.service == 'true'
         run: |
           if [ -f "${{ matrix.service.path }}/Dockerfile" ]; then
-            docker build -t eldenring/${{ matrix.service.name }}:pr-${{ github.event.pull_request.number }} \
+            docker build -t ghcr.io/mjsec-mju/elden-${{ matrix.service.name }}:pr-${{ github.event.pull_request.number }} \
               ${{ matrix.service.path }}
             echo "Build OK: ${{ matrix.service.name }}"
           fi

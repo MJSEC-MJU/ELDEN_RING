@@ -31,7 +31,7 @@ spec:
       serviceAccountName: runtime-defense-sa
       containers:
         - name: controller
-          image: eldenring/runtime-defense:latest
+          image: ghcr.io/mjsec-mju/elden-runtime-defense:dev-latest
           ports:
             - containerPort: 8080
               name: http
