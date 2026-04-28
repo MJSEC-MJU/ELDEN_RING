@@ -1,0 +1,55 @@
+# ============================================================
+# ELDEN RING - Runtime Defense Controller HPA
+#
+# CPU 70% / Memory 80% 임계값으로 2~5대 사이 자동 스케일링.
+# 공격 파동 시 빠르게 스케일 업, 평시에는 천천히 스케일 다운.
+#
+# minReplicas=2 는 Deployment.replicas 와 정합:
+#   - 롤링 업데이트 중에도 최소 1대 가용 (maxUnavailable: 0)
+#   - 단일 Pod 장애 시 즉시 가용성 유지
+#
+# 사전 요구: kube-system 의 metrics-server 가 동작 중이어야 함.
+# ============================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: runtime-defense-controller
+  namespace: elden-production
+  labels:
+    app: runtime-defense-controller
+    elden-ring/plane: runtime-defense
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: runtime-defense-controller
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      # 공격 파동 빠른 흡수: 30초 안정화 후 매 30초마다 100% 증가 허용
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      # 천천히 줄여 메모리 백업 큐 유실 방지
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 300

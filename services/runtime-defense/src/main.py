@@ -9,8 +9,10 @@ FastAPI server that:
   5. Executes active defense (rate limit, IP block, endpoint disable)
 """
 
+import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -34,11 +36,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger("runtime-defense")
 
+# ── Background drain task ────────────────────────────
+DRAIN_INTERVAL_SECONDS = 30
+
+
+async def _drain_loop() -> None:
+    """Periodically flush the in-memory Redis backup once Redis is reachable.
+
+    Runs as a single background task. Cancelled on app shutdown.
+    """
+    while True:
+        try:
+            await asyncio.sleep(DRAIN_INTERVAL_SECONDS)
+            sent = redis_pub.drain_memory_backup()
+            if sent:
+                logger.info(f"Drain loop flushed {sent} backed-up contexts")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Drain loop iteration failed")
+
+
+@asynccontextmanager
+async def lifespan(_app: "FastAPI"):
+    drain_task = asyncio.create_task(_drain_loop())
+    logger.info(f"Drain loop started (interval={DRAIN_INTERVAL_SECONDS}s)")
+    try:
+        yield
+    finally:
+        drain_task.cancel()
+        try:
+            await drain_task
+        except asyncio.CancelledError:
+            pass
+
+
 # ── App ──────────────────────────────────────────────
 app = FastAPI(
     title="ELDEN RING Runtime Defense Controller",
     version="2.0.0",
     description="Phase 1: Event pipeline + active defense",
+    lifespan=lifespan,
 )
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
@@ -183,4 +221,42 @@ async def health():
 
 @app.get("/readyz")
 async def ready():
-    return {"status": "ready", "adapters": 2, "routes_loaded": len(source_mapper.route_map)}
+    """Readiness: signals whether the controller can accept events.
+
+    Always returns 200 as long as adapters and the route map are loaded.
+    Redis being down does NOT fail readiness — events are buffered to an
+    in-memory backup and drained when Redis recovers. Failing readiness
+    here would cause Falco/ModSec webhooks to be cut off entirely, which
+    is strictly worse than transient Redis loss.
+
+    See ``/diagnostics`` for subsystem detail.
+    """
+    return {
+        "status": "ready",
+        "adapters": len(normalizer.adapters),
+        "routes_loaded": len(source_mapper.route_map),
+        "redis_connected": redis_pub.is_connected(),
+        "backup_pending": redis_pub.pending_backup_count,
+    }
+
+
+@app.get("/diagnostics")
+async def diagnostics():
+    """Detailed subsystem state for operators. Not used by K8s probes."""
+    return {
+        "redis": {
+            "host": redis_pub.host,
+            "port": redis_pub.port,
+            "connected": redis_pub.is_connected(),
+            "backup_pending": redis_pub.pending_backup_count,
+            "backup_dropped_total": redis_pub.dropped_count,
+        },
+        "pipeline": {
+            "adapters_loaded": len(normalizer.adapters),
+            "routes_loaded": len(source_mapper.route_map),
+            "events_processed": len(events_store),
+            "contexts_built": len(contexts_store),
+            "failed_parses": len(failed_logs),
+        },
+        "auth_enforced": bool(settings.WEBHOOK_AUTH_TOKEN),
+    }

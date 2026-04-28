@@ -76,6 +76,39 @@ helm upgrade falco falcosecurity/falco -n falco -f kubernetes/security/falco/val
 - 모든 Linux capability drop, `seccompProfile: RuntimeDefault`
 - `/tmp`, `/home/app/.kube` 만 emptyDir로 쓰기 허용
 
+## 신뢰성
+
+### Redis 메모리 백업 + 자동 드레인
+
+Redis 일시 장애 시 컨텍스트는 in-memory deque(상한 1000개, FIFO,
+초과 시 가장 오래된 항목 폐기)에 백업된다. 백그라운드 드레인 태스크가
+30초마다 Redis 연결을 확인하고 백업을 다시 전송한다.
+
+진단:
+
+```bash
+curl -s http://localhost:8080/diagnostics | jq .redis
+# {
+#   "connected": true,
+#   "backup_pending": 0,
+#   "backup_dropped_total": 0
+# }
+```
+
+### Readiness 정책
+
+`/readyz`는 어댑터/route-map 로드 여부만 확인하고 항상 200을 반환한다.
+Redis 다운으로 readiness 를 실패시키면 Pod 이 Service 에서 빠져
+Falco/ModSec 웹훅 자체를 잃기 때문에, **Redis 장애에도 readiness 는
+유지하고 메모리 백업으로 흡수**하는 것이 더 안전하다. Redis 상태는
+`/diagnostics` 에서 확인.
+
+### 가용성
+
+- `replicas: 2` + `maxUnavailable: 0` 롤링 → 항상 최소 1대 가용
+- HPA(`runtime-defense-hpa.yaml`): CPU 70% / Mem 80% 임계, 2~5대
+- 스케일다운은 5분 안정화 (메모리 백업 큐 유실 방지)
+
 ## CI 자동화
 
 `services/runtime-defense/**` 변경 시 자동 빌드/배포됨 (dev 브랜치 push)
