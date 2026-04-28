@@ -55,6 +55,43 @@
   .btn-secondary:hover { background:#475569; }
   .btn-danger { background:#b91c1c; color:white; }
   .btn-danger:hover { background:#dc2626; }
+  .llm-select { background:#0f172a; border:1px solid #334155; border-radius:8px; color:#e2e8f0; font-size:12px; padding:8px 28px 8px 10px; }
+  .llm-pill { display:inline-flex; align-items:center; gap:6px; border:1px solid #334155; border-radius:9999px; padding:6px 10px; font-size:12px; color:#cbd5e1; background:#0f172a; min-width:128px; justify-content:center; }
+  .llm-dot { width:8px; height:8px; border-radius:9999px; background:#64748b; display:inline-block; }
+  .llm-dot.ok { background:#22c55e; }
+  .llm-dot.warn { background:#f59e0b; }
+  .llm-dot.err { background:#ef4444; }
+
+  /* LLM telemetry HUD — proves the codex/claude CLI was *really* invoked */
+  .llm-tele { display:flex; align-items:center; gap:8px; border:1px solid #334155; border-radius:10px;
+              padding:6px 12px; font-size:12px; background:linear-gradient(180deg,#0f172a,#020617);
+              color:#cbd5e1; min-width:240px; }
+  .llm-tele.idle    { border-color:#334155; }
+  .llm-tele.running { border-color:#22d3ee; box-shadow:0 0 14px rgba(34,211,238,0.45); }
+  .llm-tele.success { border-color:#22c55e; }
+  .llm-tele.failure { border-color:#ef4444; }
+  .llm-tele .tele-label { font-size:10px; letter-spacing:0.1em; color:#64748b; text-transform:uppercase; font-weight:700; }
+  .llm-tele .tele-meta  { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:#e2e8f0; }
+  .llm-tele .tele-fix   { font-size:11px; color:#86efac; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .llm-tele.failure .tele-fix { color:#fca5a5; }
+  .live-dot { width:9px; height:9px; border-radius:9999px; display:inline-block; background:#22d3ee;
+              box-shadow:0 0 0 0 rgba(34,211,238,0.7); animation: liveBeat 1.1s ease-in-out infinite; }
+  @keyframes liveBeat {
+    0%   { box-shadow:0 0 0 0 rgba(34,211,238,0.65); transform:scale(1); }
+    70%  { box-shadow:0 0 0 9px rgba(34,211,238,0);  transform:scale(1.18); }
+    100% { box-shadow:0 0 0 0 rgba(34,211,238,0);    transform:scale(1); }
+  }
+
+  /* REAL LLM stamp visible on Phase 2 node + modal */
+  .real-llm-stamp { display:inline-flex; align-items:center; gap:6px; border:1px solid #22c55e;
+                    color:#86efac; background:rgba(34,197,94,0.12); border-radius:6px;
+                    padding:2px 8px; font-size:10px; font-weight:700; letter-spacing:0.08em;
+                    text-transform:uppercase; }
+  .real-llm-stamp::before { content:""; width:6px; height:6px; border-radius:9999px; background:#22c55e; }
+  .replay-stamp  { display:inline-flex; align-items:center; gap:6px; border:1px solid #f59e0b;
+                   color:#fcd34d; background:rgba(245,158,11,0.12); border-radius:6px;
+                   padding:2px 8px; font-size:10px; font-weight:700; letter-spacing:0.08em;
+                   text-transform:uppercase; }
 
   .stat-card { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:18px; }
   .stat-num  { font-size:36px; font-weight:800; line-height:1; }
@@ -73,7 +110,12 @@
     <div class="text-slate-400 text-sm">Pipeline Monitor</div>
     <div class="text-slate-500 text-xs hidden md:block">| 4-Phase 자동 방어 파이프라인</div>
   </div>
-  <div class="flex items-center gap-5 text-sm">
+  <div class="flex items-center gap-4 text-sm">
+    <div id="llm-tele" class="llm-tele idle" title="실제 codex/claude CLI 호출 텔레메트리">
+      <span class="tele-label">LLM</span>
+      <span id="llm-tele-state" class="tele-meta">idle</span>
+      <span id="llm-tele-fix"   class="tele-fix"></span>
+    </div>
     <div id="conn" class="flex items-center gap-2 text-slate-400">
       <span class="w-2 h-2 rounded-full bg-slate-500"></span><span>connecting…</span>
     </div>
@@ -88,8 +130,16 @@
     <div class="tab-btn" data-tab="incidents">Incidents</div>
     <div class="tab-btn" data-tab="stats">Stats</div>
   </div>
-  <div class="flex items-center gap-2 py-2">
-    <span class="text-xs text-slate-500 mr-2">시연용 attack 주입:</span>
+  <div class="flex items-center gap-2 py-2 flex-wrap justify-end">
+    <span class="text-xs text-slate-500">LLM OAuth:</span>
+    <select id="llm-provider" class="llm-select" onchange="refreshLlmStatus()">
+      <option value="codex">Codex</option>
+      <option value="claude">Claude</option>
+    </select>
+    <span id="llm-status" class="llm-pill"><span class="llm-dot"></span><span>checking</span></span>
+    <button class="btn btn-primary" onclick="startLlmLogin()">OAuth Login</button>
+    <button class="btn btn-secondary" onclick="runLlmSimulation()">LLM Smoke</button>
+    <span class="text-xs text-slate-500 ml-2">시연용 attack 주입:</span>
     <button class="btn btn-danger" onclick="inject('sqli')">⚔ SQL Injection</button>
     <button class="btn btn-secondary" onclick="inject('xss')">XSS</button>
     <button class="btn btn-secondary" onclick="inject('path')">Path Traversal</button>
@@ -139,9 +189,12 @@
             </div>
           </foreignObject>
 
-          <foreignObject x="480" y="60" width="220" height="130">
+          <foreignObject x="480" y="60" width="220" height="150">
             <div xmlns="http://www.w3.org/1999/xhtml" id="node-p2" class="pnode pnode-idle">
-              <div class="pnode-tag">🔧 PHASE 2</div>
+              <div class="flex items-center justify-between">
+                <div class="pnode-tag">🔧 PHASE 2</div>
+                <span id="p2-real-stamp" class="real-llm-stamp" style="display:none">REAL LLM</span>
+              </div>
               <div class="pnode-title">Secure Coding</div>
               <div class="pnode-sub">LLM patch + image build</div>
               <div class="pnode-sub mt-1 font-mono">elden-secure-coding</div>
@@ -262,6 +315,60 @@
 <!-- Toast -->
 <div id="toast" class="fixed bottom-6 right-6 hidden bg-slate-900 border border-cyan-500 rounded-lg px-4 py-3 z-40 shadow-2xl"></div>
 
+<!-- LLM OAuth panel -->
+<div id="llm-panel" class="fixed bottom-6 left-6 hidden bg-slate-900 border border-slate-700 rounded-xl w-[520px] max-w-[calc(100vw-3rem)] z-40 shadow-2xl overflow-hidden">
+  <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between bg-slate-800">
+    <div>
+      <div class="text-xs text-slate-400 font-mono">LLM OAuth</div>
+      <div id="llm-panel-title" class="font-bold text-cyan-300">session</div>
+    </div>
+    <button class="text-slate-400 hover:text-white text-xl leading-none" onclick="hideLlmPanel()">×</button>
+  </div>
+  <div id="llm-auth-hints" class="hidden p-4 border-b border-slate-700 bg-slate-900/95 space-y-3">
+    <div>
+      <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Login Link</div>
+      <a id="llm-auth-link" href="#" target="_blank" rel="noopener noreferrer" class="text-cyan-300 hover:text-cyan-200 underline break-all text-sm"></a>
+    </div>
+    <div id="llm-auth-code-row">
+      <div class="text-[11px] uppercase tracking-wide text-slate-500 mb-1">One-Time Code (enter on auth page)</div>
+      <div class="flex items-center gap-2">
+        <code id="llm-auth-code" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-lg text-orange-300 tracking-wide flex-1"></code>
+        <button class="btn btn-secondary shrink-0" onclick="copyLlmCode()">Copy Code</button>
+      </div>
+      <div class="text-[11px] text-slate-500 mt-2">Use this only in the official auth page.</div>
+    </div>
+  </div>
+  <!-- Claude OAuth paste-back. The CLI binds a *loopback* HTTP listener at
+       [::1]:RANDOM/callback when login starts; the user's browser can't reach
+       it across a pod boundary, so platform.claude.com falls back to "paste this
+       code into Claude Code". We accept that paste here, parse <code>#<state>
+       (or the full URL) and forward GET /callback?code=…&state=… inside the pod
+       on the user's behalf. See _forward_to_local_callback in llm_oauth.py. -->
+  <div id="llm-auth-claude-notice" class="hidden p-4 border-b border-slate-700 bg-slate-900/95 space-y-2">
+    <div class="text-[11px] uppercase tracking-wide text-amber-400 mb-1 flex items-center gap-2">
+      <span class="live-dot" style="background:#f59e0b;box-shadow:0 0 0 0 rgba(245,158,11,0.7)"></span>
+      Claude OAuth — paste authorization code
+    </div>
+    <div class="text-[11px] text-slate-400 leading-relaxed">
+      위 링크에서 로그인 + Approve 하면 <span class="font-mono text-cyan-300">platform.claude.com/oauth/code/callback</span> 페이지에
+      <b>인증 코드</b>(<span class="font-mono text-slate-300">code#state</span> 형식)가 표시돼요. 그걸 통째로 복사해서 아래에 붙여넣고 <b>Submit</b>.
+      또는 콜백 URL 전체를 그대로 붙여넣어도 됩니다.
+    </div>
+    <div class="flex items-center gap-2">
+      <input id="llm-auth-paste-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="code#state  또는  https://platform.claude.com/oauth/code/callback?code=…&state=…"
+             class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-400 focus:outline-none" />
+      <button class="btn btn-primary shrink-0" onclick="submitLlmAuthCode()">Submit</button>
+    </div>
+    <div id="llm-auth-paste-msg" class="text-[11px] text-slate-500"></div>
+    <div class="flex items-center gap-2 pt-1">
+      <button class="btn btn-secondary shrink-0" onclick="cancelLlmLogin()">Cancel login</button>
+      <span id="llm-auth-cancel-msg" class="text-[11px] text-slate-500"></span>
+    </div>
+  </div>
+  <pre id="llm-output" class="bg-slate-950 text-slate-200 text-xs p-4 max-h-72 overflow-auto whitespace-pre-wrap"></pre>
+</div>
+
 <!-- Detail modal -->
 <div id="modal" class="fixed inset-0 bg-black/75 hidden items-center justify-center p-6 z-50 backdrop-blur">
   <div class="bg-slate-900 rounded-xl border border-slate-700 max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
@@ -291,6 +398,271 @@ function toast(msg, kind='info') {
   clearTimeout(window._toastT);
   window._toastT = setTimeout(()=>t.classList.add('hidden'), 3500);
 }
+
+// ---- LLM OAuth + smoke ----
+const LLM = { status:null, loginSession:null, pollTimer:null, telemetry:null, teleTickTimer:null };
+
+// Render the live "real LLM call" telemetry HUD in the header.
+// `running` -> animated pulse + Phase 2 node tagged REAL LLM
+// `success` -> green border + provider/duration/security_fix
+// `failure` -> red border + error
+function renderLlmTelemetry(t) {
+  if (!t) return;
+  LLM.telemetry = t;
+  const root  = Q('#llm-tele');
+  const state = Q('#llm-tele-state');
+  const fix   = Q('#llm-tele-fix');
+  const stamp = Q('#p2-real-stamp');
+  root.classList.remove('idle','running','success','failure');
+  root.classList.add(t.status || 'idle');
+
+  const provider = t.provider || '—';
+  const duration = t.duration_ms != null ? `${(t.duration_ms/1000).toFixed(1)}s` : null;
+
+  if (t.status === 'running') {
+    state.innerHTML = `<span class="live-dot"></span>&nbsp; <b>${provider}</b> · CLI invoking…`;
+    fix.textContent = '';
+    stamp.style.display = 'inline-flex';
+    stamp.textContent = 'REAL LLM · running';
+    if (LLM.teleTickTimer) clearInterval(LLM.teleTickTimer);
+    LLM.teleTickTimer = setInterval(()=>{
+      if (!LLM.telemetry || LLM.telemetry.status !== 'running' || !LLM.telemetry.started_at) return;
+      const elapsed = (Date.now()/1000 - LLM.telemetry.started_at);
+      state.innerHTML = `<span class="live-dot"></span>&nbsp; <b>${provider}</b> · ${elapsed.toFixed(1)}s`;
+    }, 200);
+  } else if (t.status === 'success') {
+    if (LLM.teleTickTimer) { clearInterval(LLM.teleTickTimer); LLM.teleTickTimer = null; }
+    state.innerHTML = `✓ <b>${provider}</b> · ${duration||'—'}`;
+    fix.textContent = t.security_fix ? `fix: ${t.security_fix}` : '';
+    fix.title = t.security_fix || '';
+    stamp.style.display = 'inline-flex';
+    stamp.textContent = `REAL LLM · ${duration||'ok'}`;
+  } else if (t.status === 'failure') {
+    if (LLM.teleTickTimer) { clearInterval(LLM.teleTickTimer); LLM.teleTickTimer = null; }
+    state.innerHTML = `✗ <b>${provider}</b> failed`;
+    fix.textContent = t.error ? t.error.slice(0, 80) : '';
+    fix.title = t.error || '';
+    stamp.style.display = 'none';
+  } else {
+    if (LLM.teleTickTimer) { clearInterval(LLM.teleTickTimer); LLM.teleTickTimer = null; }
+    state.textContent = 'idle';
+    fix.textContent = '';
+    stamp.style.display = 'none';
+  }
+}
+
+function selectedLlmProvider() {
+  return Q('#llm-provider').value || 'codex';
+}
+
+function setLlmStatus(kind, text) {
+  const el = Q('#llm-status');
+  const dotClass = kind === 'ok' ? 'ok' : kind === 'warn' ? 'warn' : kind === 'err' ? 'err' : '';
+  el.innerHTML = `<span class="llm-dot ${dotClass}"></span><span>${text}</span>`;
+}
+
+function currentProviderStatus() {
+  const provider = selectedLlmProvider();
+  return (LLM.status && LLM.status.providers && LLM.status.providers[provider]) || null;
+}
+
+async function refreshLlmStatus() {
+  setLlmStatus('', 'checking');
+  try {
+    const r = await fetch('/api/llm/status');
+    const d = await r.json();
+    LLM.status = d;
+    const p = currentProviderStatus();
+    if (!p || !p.available) setLlmStatus('err', 'CLI missing');
+    else if (p.authenticated) setLlmStatus('ok', 'OAuth ready');
+    else setLlmStatus('warn', 'login needed');
+  } catch (e) {
+    setLlmStatus('err', 'status error');
+  }
+}
+
+function showLlmPanel(title, output) {
+  Q('#llm-panel-title').textContent = title;
+  Q('#llm-output').textContent = output || '';
+  updateLlmAuthHints(output || '', null);
+  Q('#llm-panel').classList.remove('hidden');
+}
+
+function hideLlmPanel() {
+  Q('#llm-panel').classList.add('hidden');
+}
+window.hideLlmPanel = hideLlmPanel;
+
+function updateLlmAuthHints(output, sessionInfo) {
+  const panel = Q('#llm-auth-hints');
+  const codeRow = Q('#llm-auth-code-row');
+  const claudeNotice = Q('#llm-auth-claude-notice');
+
+  const link = (output.match(/https:\/\/auth\.openai\.com\/codex\/device|https:\/\/[^\s]+\/[^\s]*/i) || [])[0];
+  const oneTime = (output.match(/\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/) || [])[0];
+
+  if (link || oneTime) {
+    panel.classList.remove('hidden');
+    if (link) { Q('#llm-auth-link').href = link; Q('#llm-auth-link').textContent = link; }
+    if (oneTime) { codeRow.classList.remove('hidden'); Q('#llm-auth-code').textContent = oneTime; }
+    else         { codeRow.classList.add('hidden'); Q('#llm-auth-code').textContent = ''; }
+  } else {
+    panel.classList.add('hidden');
+    Q('#llm-auth-link').textContent = '';
+    Q('#llm-auth-link').removeAttribute('href');
+    Q('#llm-auth-code').textContent = '';
+  }
+
+  // Claude notice: `claude auth login` doesn't accept paste-back from stdin/PTY
+  // (verified empirically). Show an explainer + Cancel button instead of a paste form.
+  const isClaudeRunning = !!(sessionInfo && sessionInfo.provider === 'claude' &&
+                             sessionInfo.status === 'running');
+  if (isClaudeRunning) {
+    claudeNotice.classList.remove('hidden');
+  } else {
+    claudeNotice.classList.add('hidden');
+    Q('#llm-auth-cancel-msg').textContent = '';
+  }
+}
+
+async function cancelLlmLogin() {
+  if (!LLM.loginSession) { toast('No active OAuth session', 'error'); return; }
+  const sid = LLM.loginSession;
+  Q('#llm-auth-cancel-msg').textContent = 'cancelling…';
+  try {
+    const r = await fetch(`/api/llm/login/${sid}/cancel`, { method: 'POST' });
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      Q('#llm-auth-cancel-msg').textContent = d.error || 'cancel failed';
+      toast(`Cancel failed: ${d.error||'unknown'}`, 'error');
+      return;
+    }
+    Q('#llm-auth-cancel-msg').textContent = 'cancelled';
+    clearInterval(LLM.pollTimer);
+    await refreshLlmStatus();
+    toast('OAuth login cancelled', 'success');
+  } catch (e) {
+    Q('#llm-auth-cancel-msg').textContent = e.message;
+    toast(`Cancel failed: ${e.message}`, 'error');
+  }
+}
+window.cancelLlmLogin = cancelLlmLogin;
+
+async function submitLlmAuthCode() {
+  if (!LLM.loginSession) { toast('No active OAuth session', 'error'); return; }
+  const input = Q('#llm-auth-paste-input');
+  const code = (input.value || '').trim();
+  if (!code) { toast('Paste the code#state value first', 'error'); return; }
+  Q('#llm-auth-paste-msg').textContent = 'forwarding to claude listener…';
+  try {
+    const r = await fetch(`/api/llm/login/${LLM.loginSession}/code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      Q('#llm-auth-paste-msg').textContent = d.error || 'submit failed';
+      toast(`Submit failed: ${d.error||'unknown'}`, 'error');
+      return;
+    }
+    input.value = '';
+    const httpInfo = d.callback_http ? ` (port=${d.callback_port}, http=${d.callback_http})` : '';
+    Q('#llm-auth-paste-msg').textContent = `delivered to claude callback${httpInfo}; waiting for token exchange…`;
+    toast('OAuth code forwarded to Claude CLI', 'success');
+  } catch (e) {
+    Q('#llm-auth-paste-msg').textContent = e.message;
+    toast(`Submit failed: ${e.message}`, 'error');
+  }
+}
+window.submitLlmAuthCode = submitLlmAuthCode;
+
+async function copyLlmCode() {
+  const code = Q('#llm-auth-code').textContent.trim();
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    toast('OAuth code copied', 'success');
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = code;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    toast('OAuth code copied', 'success');
+  }
+}
+window.copyLlmCode = copyLlmCode;
+
+async function startLlmLogin() {
+  const provider = selectedLlmProvider();
+  toast(`${provider} OAuth login starting...`);
+  try {
+    const r = await fetch(`/api/llm/login?provider=${provider}`, {method:'POST'});
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      toast(`OAuth login unavailable: ${d.error||'unknown'}`, 'error');
+      showLlmPanel(`${provider} OAuth`, d.error || 'OAuth login unavailable');
+      return;
+    }
+    if (d.status === 'already_authenticated') {
+      toast(`${provider} OAuth already ready`, 'success');
+      showLlmPanel(`${provider} OAuth`, d.output || 'Already authenticated');
+      await refreshLlmStatus();
+      return;
+    }
+    LLM.loginSession = d.session_id;
+    setLlmStatus('warn', 'waiting auth');
+    showLlmPanel(`${provider} OAuth`, `Started: ${d.command}\n\nWaiting for device/browser auth output...`);
+    clearInterval(LLM.pollTimer);
+    LLM.pollTimer = setInterval(()=>pollLlmLogin(d.session_id), 1500);
+    pollLlmLogin(d.session_id);
+  } catch (e) {
+    toast(`OAuth login failed: ${e.message}`, 'error');
+  }
+}
+window.startLlmLogin = startLlmLogin;
+
+async function pollLlmLogin(sessionId) {
+  try {
+    const r = await fetch(`/api/llm/login/${sessionId}`);
+    const d = await r.json();
+    Q('#llm-output').textContent = d.output || '(waiting for CLI output)';
+    updateLlmAuthHints(d.output || '', d);
+    if (d.status === 'running') setLlmStatus('warn', d.awaiting_code && !d.submitted_code ? 'paste code' : 'waiting auth');
+    if (d.status && d.status !== 'running') {
+      clearInterval(LLM.pollTimer);
+      await refreshLlmStatus();
+      toast(d.status === 'completed' ? 'OAuth login completed' : `OAuth login ${d.status}`, d.status === 'completed' ? 'success' : 'error');
+    }
+  } catch (e) {
+    clearInterval(LLM.pollTimer);
+    toast(`OAuth poll failed: ${e.message}`, 'error');
+  }
+}
+
+async function runLlmSimulation() {
+  const provider = selectedLlmProvider();
+  toast(`${provider} LLM patch smoke running...`);
+  setNode('p2','active','LLM patching...');
+  try {
+    const r = await fetch(`/api/llm/simulate?provider=${provider}`, {method:'POST'});
+    const d = await r.json();
+    if (!r.ok || d.status === 'error') {
+      setNode('p2','rejected','LLM unavailable');
+      toast(`LLM smoke failed: ${d.error||'unknown'}`, 'error');
+      showLlmPanel(`${provider} LLM smoke`, d.error || 'LLM smoke failed');
+      return;
+    }
+    toast(`LLM smoke complete: ${d.patch_id}`, 'success');
+    showLlmPanel(`${provider} LLM smoke`, `incident: ${d.incident_id}\npatch: ${d.patch_id}\nfix: ${d.security_fix}\n\n${d.patched_snippet}`);
+  } catch (e) {
+    setNode('p2','rejected','LLM failed');
+    toast(`LLM smoke failed: ${e.message}`, 'error');
+  }
+}
+window.runLlmSimulation = runLlmSimulation;
 
 // ---- inject button ----
 async function inject(scenario) {
@@ -406,7 +778,7 @@ function openModal(incidentId) {
     if (!inc) return;
     Q('#m-title').textContent = inc.incident_id;
     const p1 = inc.phase1 || {}, p1ai = p1.attack_info || {}, p1tg = p1.target || {}, p1md = p1.metadata || {};
-    const p2 = inc.phase2 || {}, p3 = inc.phase3 || {};
+    const p2 = inc.phase2 || {}, p2cs = p2.change_summary || {}, p3 = inc.phase3 || {};
     const escape = s => (s||'').toString().replace(/[<>&]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]);
     Q('#m-body').innerHTML = `
       <div class="grid grid-cols-3 gap-3">
@@ -431,7 +803,13 @@ function openModal(incidentId) {
       </section>
 
       <section class="bg-slate-800/60 rounded-lg p-4 border-l-4 border-purple-500">
-        <h3 class="font-bold text-purple-300 mb-3">🔧 Phase 2 — Secure Coding (Patch Generation)</h3>
+        <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <h3 class="font-bold text-purple-300">🔧 Phase 2 — Secure Coding (Patch Generation)</h3>
+          <div class="flex items-center gap-2">
+            ${p2cs.llm_real || p2.llm_real ? '<span class="real-llm-stamp">REAL LLM CALL</span>' : ''}
+            ${p2.simulated ? '<span class="replay-stamp">build replay</span>' : ''}
+          </div>
+        </div>
         <div class="grid grid-cols-2 gap-3 text-sm">
           <div><span class="text-slate-400">Patch ID:</span> <span class="font-mono text-xs">${p2.patch_id||'—'}</span></div>
           <div><span class="text-slate-400">Status:</span> <b>${p2.patch_status||'—'}</b></div>
@@ -439,6 +817,11 @@ function openModal(incidentId) {
           <div class="col-span-2"><span class="text-slate-400">Candidate image:</span> <span class="font-mono text-xs break-all text-emerald-300">${p2.candidate_image||'—'}</span></div>
           <div class="col-span-2"><span class="text-slate-400">Root cause:</span> ${escape((p2.analysis_summary||{}).root_cause)||'—'}</div>
           <div class="col-span-2"><span class="text-slate-400">Fix strategy:</span> ${escape((p2.analysis_summary||{}).fix_strategy)||'—'}</div>
+          <div><span class="text-slate-400">LLM provider:</span> <span class="font-mono text-xs text-cyan-300">${p2cs.llm_provider||'—'}</span></div>
+          <div><span class="text-slate-400">LLM duration:</span> <span class="font-mono text-xs">${p2cs.llm_duration_ms!=null?(p2cs.llm_duration_ms/1000).toFixed(1)+'s':'—'}</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Security fix:</span> ${escape(p2cs.security_fix)||'—'}</div>
+          ${p2cs.unified_diff ? `<div class="col-span-2"><span class="text-slate-400">Patch diff:</span><pre class="json mt-2">${escape(p2cs.unified_diff)}</pre></div>` : ''}
+          ${p2cs.patched_snippet ? `<div class="col-span-2"><span class="text-slate-400">Patched snippet:</span><pre class="json mt-2">${escape(p2cs.patched_snippet)}</pre></div>` : ''}
         </div>
       </section>
 
@@ -501,10 +884,11 @@ function renderCharts() {
 // ---- initial fetch (REST fallback) + WebSocket ----
 async function initialLoad() {
   try {
-    const [inc, ev, st] = await Promise.all([
+    const [inc, ev, st, tele] = await Promise.all([
       fetch('/api/incidents').then(r=>r.json()),
       fetch('/api/events').then(r=>r.json()),
       fetch('/api/stats').then(r=>r.json()),
+      fetch('/api/llm/telemetry').then(r=>r.json()).catch(()=>null),
     ]);
     STATE.incidents = inc || [];
     STATE.events    = (ev||[]).slice().reverse();  // backend appends; we want newest first
@@ -513,6 +897,7 @@ async function initialLoad() {
     Q('#hdr-events').textContent    = STATE.events.length;
     renderIncidentTable();
     refreshEventLog();
+    if (tele) renderLlmTelemetry(tele);
   } catch (e) { console.warn('initial load failed', e); }
 }
 
@@ -531,11 +916,14 @@ function connect() {
       Q('#hdr-incidents').textContent = STATE.incidents.length;
       renderIncidentTable();
       refreshEventLog();
+      if (d.llm_telemetry) renderLlmTelemetry(d.llm_telemetry);
     } else if (d.type === 'event') {
       appendEvent(d.event);
       react(d.event.channel, d.event.summary);
     } else if (d.type === 'incident_upsert') {
       upsertIncident(d.incident);
+    } else if (d.type === 'llm_telemetry') {
+      renderLlmTelemetry(d.telemetry);
     }
   };
 }
@@ -549,7 +937,13 @@ setInterval(()=>{
   });
 }, 5000);
 
+// Re-check OAuth/CLI availability periodically + when the tab regains focus,
+// so the header pill always reflects whether you can actually call the LLM right now.
+setInterval(()=>{ if (!document.hidden) refreshLlmStatus(); }, 20000);
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) refreshLlmStatus(); });
+
 initialLoad();
+refreshLlmStatus();
 connect();
 </script>
 

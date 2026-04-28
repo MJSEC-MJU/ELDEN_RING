@@ -26,7 +26,7 @@ spec:
       serviceAccountName: pipeline-monitor-sa
       containers:
         - name: monitor
-          image: ghcr.io/mjsec-mju/elden-pipeline-monitor:dev-latest
+          image: ghcr.io/mjsec-mju/elden-pipeline-monitor:v0.4.7-claude-callback-forward
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -36,8 +36,8 @@ spec:
             - { name: MONITOR_GOVERNANCE_URL, value: "http://governance-controller.elden-governance:8080" }
             - { name: LOG_LEVEL, value: "INFO" }
           resources:
-            requests: { cpu: 50m, memory: 128Mi }
-            limits:   { cpu: 300m, memory: 256Mi }
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1500m, memory: 2Gi }
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
             initialDelaySeconds: 3

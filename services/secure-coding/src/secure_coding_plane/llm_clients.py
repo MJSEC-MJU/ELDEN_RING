@@ -128,8 +128,9 @@ class CodexPatchCliClient(BasePatchCliClient):
 
     def _check_authentication(self) -> None:
         completed = self._run([self.command, "login", "status"], cwd=Path.cwd())
-        if "Logged in" not in completed.stdout:
-            detail = completed.stdout.strip() or completed.stderr.strip() or "Codex login status unavailable"
+        login_status = "\n".join(part.strip() for part in (completed.stdout, completed.stderr) if part.strip())
+        if "Logged in" not in login_status:
+            detail = login_status or "Codex login status unavailable"
             raise LlmPatchClientError(f"Codex OAuth session not ready: {detail}")
 
     def generate_patch_json(
@@ -191,24 +192,40 @@ class ClaudeCodePatchCliClient(BasePatchCliClient):
         schema: dict[str, Any],
     ) -> LlmStructuredResponse:
         self._ensure_ready()
+        # Send the vulnerable code via stdin (safe for embedded quotes / SQL strings)
+        # and enforce the response shape with --json-schema (Claude Code 2.0.45+).
+        # Claude wraps the schema-validated object under `structured_output`.
         args = [
             self.command,
             "-p",
-            "--permission-mode",
-            "dontAsk",
-            "--tools",
-            "",
-            "--output-format",
-            "text",
+            "--permission-mode", "dontAsk",
+            "--tools", "",
+            "--output-format", "json",
+            "--json-schema", json.dumps(schema),
         ]
         if self.model:
             args.extend(["--model", self.model])
-        args.append(prompt)
-        completed = self._run(args, cwd=workdir)
+        completed = self._run(args, cwd=workdir, input_text=prompt)
         raw_text = completed.stdout
         return LlmStructuredResponse(
-            payload=self._parse_json_payload(raw_text),
+            payload=self._extract_structured_output(raw_text),
             raw_text=raw_text,
             provider=self.provider_name,
             model=self.model,
         )
+
+    def _extract_structured_output(self, raw_text: str) -> dict[str, Any]:
+        try:
+            wrapper = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return self._parse_json_payload(raw_text)
+        if isinstance(wrapper, dict):
+            structured = wrapper.get("structured_output")
+            if isinstance(structured, dict):
+                return structured
+            result = wrapper.get("result")
+            if isinstance(result, dict):
+                return result
+            if isinstance(result, str) and result.strip():
+                return self._parse_json_payload(result)
+        return self._parse_json_payload(raw_text)

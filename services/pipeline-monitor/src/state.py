@@ -102,6 +102,8 @@ class PipelineState:
                 "regression": payload.get("regression"),
                 "slo": payload.get("slo"),
             }
+            rec.risk = payload.get("risk") or rec.risk
+            rec.branch = payload.get("branch") or rec.branch
             rec.phase4_stage = "phase3_done"
         elif channel == "elden:phase2:retry":
             rec.phase4_stage = "rejected"
