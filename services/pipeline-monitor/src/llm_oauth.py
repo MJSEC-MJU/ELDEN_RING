@@ -29,9 +29,9 @@ class LoginSession:
     status: str = "running"
     output: list[str] = field(default_factory=list)
     returncode: int | None = None
-    # Live subprocess handle so we can forward an OAuth code back into the CLI's stdin.
-    # Required for providers like claude-code whose login flow ends in a redirect_uri
-    # that prints a code on the callback page; that code must be pasted into the CLI.
+    # Live subprocess handle so we can forward an OAuth code back into the CLI.
+    # Required for providers like claude-code whose login flow only completes
+    # when its loopback `/callback` listener receives the authorize redirect.
     process: subprocess.Popen | None = field(default=None, repr=False)
     awaiting_code: bool = False
     submitted_code: bool = False
@@ -94,24 +94,29 @@ def get_login_session(session_id: str) -> dict[str, Any]:
 
 
 def submit_login_code(session_id: str, code: str) -> dict[str, Any]:
-    """Forward an OAuth callback to the running CLI.
+    """Forward an OAuth callback to the running CLI's loopback listener.
 
-    Mechanism (claude-code, verified 2026-04):
-      1. `claude auth login` boots, prints the authorize URL, and **starts a tiny
-         loopback HTTP listener on a random port** (only on `[::1]`/IPv6 loopback).
-         When run on the user's own laptop, the browser's redirect lands directly
-         on `http://localhost:<port>/callback?code=...&state=...` and auth completes.
-      2. When run inside a pod/container, that listener is unreachable from the
-         user's browser, so `platform.claude.com/oauth/code/callback` instead
-         shows a `<code>#<state>` string with the prompt "Claude Code에 붙여넣으세요".
-      3. The CLI's stdin is *not* the way to feed that paste-back back in (its TUI
-         only renders under a real interactive terminal). The reliable path is to
-         take the pasted `<code>#<state>` (or full callback URL) and POST it to
-         the CLI's own loopback listener — the same path it would have received
-         from a local browser.
+    Mechanism (claude-code, verified against the 2.1.121 binary):
+      1. `claude.startOAuthFlow` builds *two* authorize URLs from the same
+         `code_challenge` + `state`: a manual one
+         (`redirect_uri=https://platform.claude.com/oauth/code/callback`) and a
+         local one (`redirect_uri=http://localhost:<port>/callback`).
+      2. Token-exchange's `redirect_uri` is decided by `!Y` where
+         `Y = listener.hasPendingResponse()`. So it must match whichever URL the
+         browser actually authorised with — otherwise Anthropic returns 400
+         "Token exchange failed".
+      3. The CLI prints only the *manual* URL on stdout. If the user grabs the
+         code off platform.claude.com (manual) and we forward it to the local
+         listener, the listener sets `Y=true` and the exchange uses the local
+         redirect_uri — which doesn't match the manual one used at auth, so 400.
+      4. Fix: we surface the *local* URL too (built by swapping the redirect_uri
+         on the printed URL once we discover the listener's port). The user
+         visits the local URL, signs in, and the browser then tries to load
+         `http://localhost:<port>/callback?...` (which fails on a remote pod —
+         expected, the address-bar URL is what we need). They paste that URL
+         here, we forward it to the listener, and the redirect_uris line up.
 
-    For codex's device-auth flow this endpoint is a no-op: codex picks up its
-    one-time code from the browser side directly, no callback needed."""
+    For codex's device-auth flow this endpoint is a no-op."""
     raw = (code or "").strip()
     if not raw:
         raise LlmOAuthError("OAuth code cannot be empty")
@@ -127,7 +132,8 @@ def submit_login_code(session_id: str, code: str) -> dict[str, Any]:
     if not auth_code or not state_param:
         raise LlmOAuthError(
             "Could not parse 'code#state' or callback URL from input — "
-            "paste the value shown on platform.claude.com (or the full redirect URL)"
+            "open the local OAuth URL shown above, sign in, then paste the "
+            "URL the browser tried to load (it'll be http://localhost:<port>/callback?code=...&state=...)"
         )
 
     if session.provider == "claude":
@@ -177,31 +183,6 @@ def submit_login_code(session_id: str, code: str) -> dict[str, Any]:
         }
 
 
-def _parse_oauth_paste(text: str) -> tuple[str, str]:
-    """Extract (code, state) from one of:
-      * `<code>#<state>`  (what platform.claude.com displays)
-      * full callback URL `https://.../callback?code=...&state=...`
-      * raw query string `code=...&state=...`
-    """
-    text = text.strip()
-    # Full URL
-    if text.startswith(("http://", "https://")):
-        try:
-            qs = urllib.parse.parse_qs(urllib.parse.urlparse(text).query)
-        except Exception:
-            return "", ""
-        return (qs.get("code", [""])[0], qs.get("state", [""])[0])
-    # Bare query string
-    if "code=" in text and "state=" in text and "#" not in text:
-        qs = urllib.parse.parse_qs(text.lstrip("?&"))
-        return (qs.get("code", [""])[0], qs.get("state", [""])[0])
-    # `code#state`
-    if "#" in text:
-        code, _, state = text.partition("#")
-        return code.strip(), state.strip()
-    return "", ""
-
-
 def _find_claude_listener_port(proc: subprocess.Popen | None) -> int | None:
     """Walk /proc/<pid>/fd to find the loopback HTTP listener claude opens for OAuth.
     Returns the port (host byte order) or None if the listener has already closed."""
@@ -210,7 +191,6 @@ def _find_claude_listener_port(proc: subprocess.Popen | None) -> int | None:
     pid = proc.pid
     try:
         sock_inodes: set[str] = set()
-        # Include the main thread + all child threads (node spawns multiple)
         task_root = f"/proc/{pid}/task"
         thread_ids = os.listdir(task_root) if os.path.isdir(task_root) else [str(pid)]
         for tid in thread_ids:
@@ -239,8 +219,7 @@ def _find_claude_listener_port(proc: subprocess.Popen | None) -> int | None:
                 cols = row.split()
                 if len(cols) < 10:
                     continue
-                # state 0A = LISTEN, st col is index 3 ("local rem st ...")
-                if cols[3] != "0A":
+                if cols[3] != "0A":  # 0A = LISTEN
                     continue
                 if cols[9] not in sock_inodes:
                     continue
@@ -257,9 +236,9 @@ def _find_claude_listener_port(proc: subprocess.Popen | None) -> int | None:
 
 
 def _forward_to_local_callback(port: int, code: str, state: str) -> tuple[bool, str]:
-    """POST/GET the OAuth result to claude's local listener.
-    `/callback` is the path that empirically reaches claude's auth handler.
-    The listener is IPv6 only (`[::1]:port`) on the bundled claude-code build."""
+    """GET claude's loopback listener at /callback, which is wired to set
+    `Y=true` so token-exchange uses the local-mode redirect_uri (which matches
+    the local-mode auth URL the user is asked to visit)."""
     qs = urllib.parse.urlencode({"code": code, "state": state})
     last_detail = "no-attempt"
     for host in ("[::1]", "127.0.0.1"):
@@ -279,6 +258,92 @@ def _forward_to_local_callback(port: int, code: str, state: str) -> tuple[bool, 
             last_detail = f"{host}=err:{type(e).__name__}"
             continue
     return False, last_detail
+
+
+_AUTH_URL_RE = re.compile(
+    r"https?://[^\s]*?/oauth/authorize\?[^\s]*",
+    re.IGNORECASE,
+)
+
+
+def _local_oauth_url(manual_url: str, port: int) -> str | None:
+    """Rebuild the same authorize URL with `redirect_uri=http://localhost:<port>/callback`.
+    Everything else (state, code_challenge, client_id) is preserved, so the resulting
+    code Anthropic mints is bound to the local listener — and our forwarder won't
+    trip the redirect_uri-mismatch 400."""
+    try:
+        parsed = urllib.parse.urlparse(manual_url)
+    except Exception:
+        return None
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    qs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    new_qs: list[tuple[str, str]] = []
+    saw_redirect = False
+    for k, v in qs:
+        if k == "redirect_uri":
+            new_qs.append((k, f"http://localhost:{port}/callback"))
+            saw_redirect = True
+        else:
+            new_qs.append((k, v))
+    if not saw_redirect:
+        new_qs.append(("redirect_uri", f"http://localhost:{port}/callback"))
+    new_query = urllib.parse.urlencode(new_qs)
+    return urllib.parse.urlunparse(parsed._replace(query=new_query))
+
+
+def _augment_claude_session_with_local_url(session: LoginSession) -> None:
+    """Once claude has printed the manual URL and bound its loopback listener,
+    compute the matching *local* URL and surface it in the session output. The
+    dashboard renders it as the primary action so users skip the manual flow
+    that we have no way to feed back into the CLI from outside."""
+    if session.provider != "claude":
+        return
+    if any("[dashboard] Local OAuth URL" in line for line in session.output):
+        return
+    manual_url: str | None = None
+    for line in session.output:
+        m = _AUTH_URL_RE.search(line)
+        if m and "redirect_uri" in m.group(0):
+            manual_url = m.group(0)
+            break
+    if not manual_url:
+        return
+    port = _find_claude_listener_port(session.process)
+    if not port:
+        return
+    local_url = _local_oauth_url(manual_url, port)
+    if not local_url:
+        return
+    session.output.append(
+        "[dashboard] Local OAuth URL (use this one — paste-back actually works):"
+    )
+    session.output.append(local_url)
+
+
+def _parse_oauth_paste(text: str) -> tuple[str, str]:
+    """Extract (code, state) from one of:
+      * `<code>#<state>`  (what platform.claude.com displays)
+      * full callback URL `https://.../callback?code=...&state=...`
+      * raw query string `code=...&state=...`
+    """
+    text = text.strip()
+    # Full URL
+    if text.startswith(("http://", "https://")):
+        try:
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(text).query)
+        except Exception:
+            return "", ""
+        return (qs.get("code", [""])[0], qs.get("state", [""])[0])
+    # Bare query string
+    if "code=" in text and "state=" in text and "#" not in text:
+        qs = urllib.parse.parse_qs(text.lstrip("?&"))
+        return (qs.get("code", [""])[0], qs.get("state", [""])[0])
+    # `code#state`
+    if "#" in text:
+        code, _, state = text.partition("#")
+        return code.strip(), state.strip()
+    return "", ""
 
 
 def cancel_login_session(session_id: str) -> dict[str, Any]:
@@ -459,6 +524,9 @@ _OAUTH_CODE_PROMPTS = (
     "authorization code:",
     "auth code:",
     "code:",
+    # claude prints these *before* its loopback listener will see anything
+    "if the browser didn't open",
+    "opening browser to sign in",
 )
 
 
@@ -484,6 +552,17 @@ def _run_login_session(session: LoginSession) -> None:
                 low = stripped.lower()
                 if not session.submitted_code and any(p in low for p in _OAUTH_CODE_PROMPTS):
                     session.awaiting_code = True
+            # Once claude has printed its manual auth URL, surface the matching
+            # *local* URL too — that's the one the user actually needs to visit
+            # so the eventual paste-back lines up with the local-mode redirect_uri
+            # in token-exchange. The listener port only exists *after* the bind,
+            # which is essentially immediate but we still defer until we see
+            # the URL line on stdout.
+            if session.provider == "claude" and "/oauth/authorize" in stripped:
+                # Give the listener a beat to bind before walking /proc.
+                time.sleep(0.1)
+                with _LOGIN_LOCK:
+                    _augment_claude_session_with_local_url(session)
         returncode = process.wait(timeout=300)
         with _LOGIN_LOCK:
             session.returncode = returncode

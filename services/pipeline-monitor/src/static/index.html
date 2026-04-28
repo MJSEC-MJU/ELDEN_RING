@@ -133,8 +133,8 @@
   <div class="flex items-center gap-2 py-2 flex-wrap justify-end">
     <span class="text-xs text-slate-500">LLM OAuth:</span>
     <select id="llm-provider" class="llm-select" onchange="refreshLlmStatus()">
-      <option value="codex">Codex</option>
       <option value="claude">Claude</option>
+      <option value="codex">Codex</option>
     </select>
     <span id="llm-status" class="llm-pill"><span class="llm-dot"></span><span>checking</span></span>
     <button class="btn btn-primary" onclick="startLlmLogin()">OAuth Login</button>
@@ -338,25 +338,35 @@
       <div class="text-[11px] text-slate-500 mt-2">Use this only in the official auth page.</div>
     </div>
   </div>
-  <!-- Claude OAuth paste-back. The CLI binds a *loopback* HTTP listener at
-       [::1]:RANDOM/callback when login starts; the user's browser can't reach
-       it across a pod boundary, so platform.claude.com falls back to "paste this
-       code into Claude Code". We accept that paste here, parse <code>#<state>
-       (or the full URL) and forward GET /callback?code=…&state=… inside the pod
-       on the user's behalf. See _forward_to_local_callback in llm_oauth.py. -->
+  <!-- Claude OAuth paste-back. The user must visit the *local-mode* URL we
+       compute server-side (redirect_uri=http://localhost:<port>/callback) so
+       Anthropic mints a code bound to localhost. The browser then tries to
+       navigate to localhost on the user's machine, fails (the listener lives
+       inside the pod), but leaves the URL in the address bar. We forward
+       that URL to the in-pod listener and token-exchange completes. -->
   <div id="llm-auth-claude-notice" class="hidden p-4 border-b border-slate-700 bg-slate-900/95 space-y-2">
     <div class="text-[11px] uppercase tracking-wide text-amber-400 mb-1 flex items-center gap-2">
       <span class="live-dot" style="background:#f59e0b;box-shadow:0 0 0 0 rgba(245,158,11,0.7)"></span>
-      Claude OAuth — paste authorization code
+      Claude OAuth — local-mode paste-back
+    </div>
+    <div id="llm-auth-claude-localurl" class="hidden text-[11px] leading-relaxed border border-emerald-500/50 bg-emerald-500/5 rounded-lg p-2 space-y-1">
+      <div class="text-emerald-300 font-bold">아래 LOCAL URL 을 새 탭에서 여세요 (위 Login Link 말고 이거):</div>
+      <div class="flex items-center gap-2">
+        <a id="llm-auth-claude-localurl-link" target="_blank" rel="noopener" class="font-mono text-cyan-300 break-all underline hover:text-cyan-200 flex-1"></a>
+        <button class="btn btn-secondary text-xs shrink-0" onclick="copyLlmLocalUrl()">Copy</button>
+      </div>
     </div>
     <div class="text-[11px] text-slate-400 leading-relaxed">
-      위 링크에서 로그인 + Approve 하면 <span class="font-mono text-cyan-300">platform.claude.com/oauth/code/callback</span> 페이지에
-      <b>인증 코드</b>(<span class="font-mono text-slate-300">code#state</span> 형식)가 표시돼요. 그걸 통째로 복사해서 아래에 붙여넣고 <b>Submit</b>.
-      또는 콜백 URL 전체를 그대로 붙여넣어도 됩니다.
+      <ol class="list-decimal list-inside space-y-0.5">
+        <li>위 <b class="text-emerald-300">LOCAL URL</b> 을 새 탭에서 열어 로그인 + Approve.</li>
+        <li>브라우저가 <span class="font-mono text-slate-300">http://localhost:&lt;port&gt;/callback?code=…&amp;state=…</span> 로 이동 시도하다 <b>연결 실패</b> 페이지가 뜹니다 (정상).</li>
+        <li>그 <b>주소창의 전체 URL</b> 을 복사해서 아래에 붙여넣고 <b>Submit</b>.</li>
+      </ol>
+      <div class="mt-1 text-amber-300">⚠ <span class="font-mono">platform.claude.com/oauth/code/callback</span> (code#state 화면) 으로 가셨다면 그 코드는 못 씁니다. 위 LOCAL URL 로 다시 시작하세요.</div>
     </div>
     <div class="flex items-center gap-2">
       <input id="llm-auth-paste-input" type="text" autocomplete="off" spellcheck="false"
-             placeholder="code#state  또는  https://platform.claude.com/oauth/code/callback?code=…&state=…"
+             placeholder="http://localhost:&lt;port&gt;/callback?code=…&state=…"
              class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-sm text-slate-100 focus:border-amber-400 focus:outline-none" />
       <button class="btn btn-primary shrink-0" onclick="submitLlmAuthCode()">Submit</button>
     </div>
@@ -452,7 +462,25 @@ function renderLlmTelemetry(t) {
 }
 
 function selectedLlmProvider() {
-  return Q('#llm-provider').value || 'codex';
+  return Q('#llm-provider').value || 'claude';
+}
+
+// Snap the dropdown to whatever provider is actually authenticated. Avoids
+// the "LLM unavailable" footgun where the default picks the wrong CLI.
+let _llmAutoSelected = false;
+function autoSelectAuthedProvider(status) {
+  if (_llmAutoSelected || !status || !status.providers) return;
+  const sel = Q('#llm-provider');
+  const current = sel.value;
+  const currentAuthed = !!(status.providers[current] && status.providers[current].authenticated);
+  if (currentAuthed) { _llmAutoSelected = true; return; }
+  for (const name of ['claude', 'codex']) {
+    if (status.providers[name] && status.providers[name].authenticated) {
+      sel.value = name;
+      _llmAutoSelected = true;
+      return;
+    }
+  }
 }
 
 function setLlmStatus(kind, text) {
@@ -472,6 +500,7 @@ async function refreshLlmStatus() {
     const r = await fetch('/api/llm/status');
     const d = await r.json();
     LLM.status = d;
+    autoSelectAuthedProvider(d);
     const p = currentProviderStatus();
     if (!p || !p.available) setLlmStatus('err', 'CLI missing');
     else if (p.authenticated) setLlmStatus('ok', 'OAuth ready');
@@ -498,7 +527,19 @@ function updateLlmAuthHints(output, sessionInfo) {
   const codeRow = Q('#llm-auth-code-row');
   const claudeNotice = Q('#llm-auth-claude-notice');
 
-  const link = (output.match(/https:\/\/auth\.openai\.com\/codex\/device|https:\/\/[^\s]+\/[^\s]*/i) || [])[0];
+  // Codex device-auth: "https://auth.openai.com/..." + 4-5 char one-time code.
+  // Claude shows the *manual-mode* /oauth/authorize URL on stdout; we never want
+  // to send the user there (paste-back doesn't reach the CLI from outside), so
+  // exclude it from the generic "link" capture.
+  const allLinks = output.match(/https?:\/\/[^\s]+/gi) || [];
+  let link = '';
+  for (const l of allLinks) {
+    if (l.includes('auth.openai.com/codex')) { link = l; break; }
+    if (!l.includes('platform.claude.com')
+        && !l.includes('claude.com/cai/oauth/authorize')) {
+      link = link || l;
+    }
+  }
   const oneTime = (output.match(/\b[A-Z0-9]{4}-[A-Z0-9]{5}\b/) || [])[0];
 
   if (link || oneTime) {
@@ -513,17 +554,45 @@ function updateLlmAuthHints(output, sessionInfo) {
     Q('#llm-auth-code').textContent = '';
   }
 
-  // Claude notice: `claude auth login` doesn't accept paste-back from stdin/PTY
-  // (verified empirically). Show an explainer + Cancel button instead of a paste form.
+  // Claude notice: show the local-mode URL (which the backend writes to the
+  // session output once the loopback listener is bound). The user must visit
+  // *that* URL — visiting the manual one will mint a code that token-exchange
+  // can't redeem.
   const isClaudeRunning = !!(sessionInfo && sessionInfo.provider === 'claude' &&
                              sessionInfo.status === 'running');
   if (isClaudeRunning) {
     claudeNotice.classList.remove('hidden');
+    codeRow.classList.add('hidden');
+    const localUrlBlock = Q('#llm-auth-claude-localurl');
+    const localUrlLink  = Q('#llm-auth-claude-localurl-link');
+    const localMatch = (output.match(/https?:\/\/[^\s]*?\/oauth\/authorize\?[^\s]*?redirect_uri=http%3A%2F%2Flocalhost[^\s]*/i) || [])[0];
+    if (localMatch) {
+      localUrlBlock.classList.remove('hidden');
+      localUrlLink.href = localMatch;
+      localUrlLink.textContent = localMatch;
+    } else {
+      localUrlBlock.classList.add('hidden');
+      localUrlLink.removeAttribute('href');
+      localUrlLink.textContent = '';
+    }
   } else {
     claudeNotice.classList.add('hidden');
     Q('#llm-auth-cancel-msg').textContent = '';
   }
 }
+
+async function copyLlmLocalUrl() {
+  const url = Q('#llm-auth-claude-localurl-link').textContent.trim();
+  if (!url) return;
+  try { await navigator.clipboard.writeText(url); toast('Local OAuth URL copied', 'success'); }
+  catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = url; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+    toast('Local OAuth URL copied', 'success');
+  }
+}
+window.copyLlmLocalUrl = copyLlmLocalUrl;
 
 async function cancelLlmLogin() {
   if (!LLM.loginSession) { toast('No active OAuth session', 'error'); return; }
@@ -552,8 +621,8 @@ async function submitLlmAuthCode() {
   if (!LLM.loginSession) { toast('No active OAuth session', 'error'); return; }
   const input = Q('#llm-auth-paste-input');
   const code = (input.value || '').trim();
-  if (!code) { toast('Paste the code#state value first', 'error'); return; }
-  Q('#llm-auth-paste-msg').textContent = 'forwarding to claude listener…';
+  if (!code) { toast('Paste the localhost callback URL (or code#state) first', 'error'); return; }
+  Q('#llm-auth-paste-msg').textContent = 'forwarding callback to Claude listener…';
   try {
     const r = await fetch(`/api/llm/login/${LLM.loginSession}/code`, {
       method: 'POST',
@@ -567,9 +636,9 @@ async function submitLlmAuthCode() {
       return;
     }
     input.value = '';
-    const httpInfo = d.callback_http ? ` (port=${d.callback_port}, http=${d.callback_http})` : '';
-    Q('#llm-auth-paste-msg').textContent = `delivered to claude callback${httpInfo}; waiting for token exchange…`;
-    toast('OAuth code forwarded to Claude CLI', 'success');
+    const portInfo = d.callback_port ? ` (port=${d.callback_port}, http=${d.callback_http ?? '?'})` : '';
+    Q('#llm-auth-paste-msg').textContent = `callback delivered${portInfo}; waiting for token exchange…`;
+    toast('OAuth callback forwarded', 'success');
   } catch (e) {
     Q('#llm-auth-paste-msg').textContent = e.message;
     toast(`Submit failed: ${e.message}`, 'error');
