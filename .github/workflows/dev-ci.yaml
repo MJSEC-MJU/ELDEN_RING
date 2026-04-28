@@ -90,14 +90,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
           if ls kubernetes/environments/production/runtime-defense*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/production/ -n elden-production
@@ -147,14 +156,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
           if ls kubernetes/environments/secure-coding/*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/secure-coding/ -n elden-secure-coding
@@ -201,14 +219,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
           if ls kubernetes/environments/staging/recovery-assurance*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/staging/ -n elden-staging
@@ -255,14 +282,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
           if ls kubernetes/environments/governance/*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/governance/ -n elden-governance
@@ -280,13 +316,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Apply Base Resources
+        if: steps.kc.outputs.configured == 'true'
         run: |
           kubectl apply -f kubernetes/base/ --recursive
