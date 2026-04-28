@@ -19,6 +19,19 @@
 ## 이 폴더의 기존 파일
 
 - `deployment.yaml` - target-app Staging 배포 (패치 후보가 여기에 배포됨)
+- `recovery-assurance.yaml` - Phase 3 API + Redis worker 배포
+
+## 현재 Phase 3 연결 방식
+
+```
+Secure Coding Plane
+  -> Redis elden:phase3:validate
+  -> Recovery Assurance worker
+  -> 검증 성공: Redis elden:phase4:promote
+  -> 검증 실패: Redis elden:phase2:retry
+```
+
+`elden:phase4:promote` payload는 Governance Plane의 `Phase3Result.parse()`가 읽는 `phase2 + exploit/regression/slo` envelope 형식을 사용합니다.
 
 ## 추가로 올릴 것
 

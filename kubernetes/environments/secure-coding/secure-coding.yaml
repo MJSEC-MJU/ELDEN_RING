@@ -1,0 +1,110 @@
+# Phase 2 — Secure Coding Plane
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-coding
+  namespace: elden-secure-coding
+  labels:
+    app: secure-coding
+    elden-ring/plane: secure-coding
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secure-coding
+  template:
+    metadata:
+      labels:
+        app: secure-coding
+        elden-ring/plane: secure-coding
+    spec:
+      serviceAccountName: secure-coding-sa
+      containers:
+        - name: api
+          image: ghcr.io/mjsec-mju/elden-secure-coding:dev-latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env: &secureCodingEnv
+            - name: PLANE_REDIS_URL
+              value: redis://redis-master.elden-monitoring:6379/0
+            - name: SECURE_CODING_INGEST_CHANNEL
+              value: elden:phase2:context
+            - name: SECURE_CODING_VALIDATE_CHANNEL
+              value: elden:phase3:validate
+            - name: SECURE_CODING_RETRY_CHANNEL
+              value: elden:phase2:retry
+            - name: SECURE_CODING_LLM_PROVIDER
+              value: mock
+            - name: SECURE_CODING_BUILD_MODE
+              value: simulate
+            - name: PLANE_WORKSPACE_ROOT
+              value: /app/runtime/workspace
+            - name: PLANE_ARTIFACT_ROOT
+              value: /app/artifacts
+            - name: PLANE_DB_PATH
+              value: /app/runtime/secure_coding.db
+          readinessProbe:
+            httpGet:
+              path: /api/v1/secure-coding/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/secure-coding/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: runtime
+              mountPath: /app/runtime
+            - name: artifacts
+              mountPath: /app/artifacts
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+        - name: worker
+          image: ghcr.io/mjsec-mju/elden-secure-coding:dev-latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "src.worker"]
+          env: *secureCodingEnv
+          volumeMounts:
+            - name: runtime
+              mountPath: /app/runtime
+            - name: artifacts
+              mountPath: /app/artifacts
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        - name: artifacts
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: secure-coding
+  namespace: elden-secure-coding
+  labels:
+    app: secure-coding
+    elden-ring/plane: secure-coding
+spec:
+  selector:
+    app: secure-coding
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  type: ClusterIP
