@@ -2,11 +2,14 @@
 
 Caps every ``payload_sample`` at a fixed byte budget so large request
 bodies (file uploads, base64 blobs) cannot blow up Redis/Phase 2.
-1 KiB is enough for the patterns Phase 2 reasons about (SQLi/XSS/path
-traversal payloads are typically tens of bytes).
+The default (~1 KiB via settings.MAX_PAYLOAD_BYTES) is enough for the
+patterns Phase 2 reasons about (SQLi/XSS/path traversal payloads are
+typically tens of bytes).
 """
 
-MAX_PAYLOAD_BYTES = 1024
+from src.config import settings
+
+MAX_PAYLOAD_BYTES = settings.MAX_PAYLOAD_BYTES
 TRUNCATION_MARKER = "...[truncated]"
 
 

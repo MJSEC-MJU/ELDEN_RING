@@ -37,7 +37,6 @@ configure_logging()
 logger = logging.getLogger("runtime-defense")
 
 # ── Background drain task ────────────────────────────
-DRAIN_INTERVAL_SECONDS = 30
 
 
 async def _drain_loop() -> None:
@@ -47,7 +46,7 @@ async def _drain_loop() -> None:
     """
     while True:
         try:
-            await asyncio.sleep(DRAIN_INTERVAL_SECONDS)
+            await asyncio.sleep(settings.DRAIN_INTERVAL_SECONDS)
             sent = redis_pub.drain_memory_backup()
             if sent:
                 logger.info(f"Drain loop flushed {sent} backed-up contexts")
@@ -60,7 +59,7 @@ async def _drain_loop() -> None:
 @asynccontextmanager
 async def lifespan(_app: "FastAPI"):
     drain_task = asyncio.create_task(_drain_loop())
-    logger.info(f"Drain loop started (interval={DRAIN_INTERVAL_SECONDS}s)")
+    logger.info(f"Drain loop started (interval={settings.DRAIN_INTERVAL_SECONDS}s)")
     try:
         yield
     finally:

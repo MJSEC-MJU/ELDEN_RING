@@ -17,6 +17,7 @@ from typing import Optional
 import redis
 
 from src import metrics
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,7 @@ logger = logging.getLogger(__name__)
 # When the in-memory backup is full we drop the OLDEST entry. Recent
 # attack contexts are higher value for analysis than ones that have
 # already aged out during a multi-minute Redis outage.
-MAX_BACKUP_SIZE = 1000
-
-_CONNECT_TIMEOUT = 2.0
-_OP_TIMEOUT = 2.0
+MAX_BACKUP_SIZE = settings.MEMORY_BACKUP_MAX_SIZE
 
 
 class RedisPublisher:
@@ -35,8 +33,8 @@ class RedisPublisher:
         self.client: Optional[redis.Redis] = None
         self.host = host
         self.port = port
-        self.channel = "elden:phase2:context"
-        self.queue_key = "elden:phase2:context:queue"
+        self.channel = settings.REDIS_PUBSUB_CHANNEL
+        self.queue_key = settings.REDIS_QUEUE_KEY
         self._memory_backup: collections.deque[dict] = collections.deque(
             maxlen=MAX_BACKUP_SIZE
         )
@@ -49,8 +47,8 @@ class RedisPublisher:
                 host=self.host,
                 port=self.port,
                 decode_responses=True,
-                socket_connect_timeout=_CONNECT_TIMEOUT,
-                socket_timeout=_OP_TIMEOUT,
+                socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT,
+                socket_timeout=settings.REDIS_OP_TIMEOUT,
             )
             self.client.ping()
             logger.info(f"Connected to Redis at {self.host}:{self.port}")
