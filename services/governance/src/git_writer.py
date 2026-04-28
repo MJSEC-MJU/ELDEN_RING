@@ -23,7 +23,8 @@ class GitWriter:
         risk: str,
         validation_summary: str,
     ) -> tuple[str, int]:
-        branch = f"{self.prefix}{incident_id}"
+        ident = incident_id[4:] if incident_id.startswith("inc-") else incident_id
+        branch = f"{self.prefix}{ident}"
         base_sha = self.repo.get_branch(self.base).commit.sha
         try:
             self.repo.create_git_ref(ref=f"refs/heads/{branch}", sha=base_sha)
