@@ -10,11 +10,12 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from src.models import NormalizedEvent
+from src import metrics
 from src.config import settings
-from src.defense.rate_limiter import apply_rate_limit
-from src.defense.ip_blocker import block_ip
 from src.defense.endpoint_disabler import disable_endpoint
+from src.defense.ip_blocker import block_ip
+from src.defense.rate_limiter import apply_rate_limit
+from src.models import NormalizedEvent
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class DefenseManager:
             await apply_rate_limit(source_ip, settings.RATE_LIMIT_RPM)
             actions_taken.append("rate_limit")
             self._record("rate_limit", source_ip, event.event_id)
+            metrics.defense_actions_total.labels(action="rate_limit").inc()
 
         # Lv.2: IP Block
         if source_ip and source_ip not in self._blocked_ips and (
@@ -53,6 +55,7 @@ class DefenseManager:
             self._blocked_ips.add(source_ip)
             actions_taken.append("ip_blocked")
             self._record("ip_blocked", source_ip, event.event_id)
+            metrics.defense_actions_total.labels(action="ip_blocked").inc()
 
         # Lv.3: Endpoint Disable
         if endpoint_key not in self._disabled_endpoints and (
@@ -64,6 +67,7 @@ class DefenseManager:
             self._disabled_endpoints.add(endpoint_key)
             actions_taken.append("endpoint_disabled")
             self._record("endpoint_disabled", endpoint_key, event.event_id)
+            metrics.defense_actions_total.labels(action="endpoint_disabled").inc()
 
         result = "+".join(actions_taken) if actions_taken else "none"
         logger.info(f"Defense actions for {event.event_id}: {result}")

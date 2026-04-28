@@ -4,11 +4,11 @@ Parses JSON audit logs from ModSecurity + OWASP CRS and converts them
 into NormalizedEvent objects. Maps CRS Rule ID ranges to attack categories.
 """
 
-import uuid
 from datetime import datetime, timezone
 
-from src.adapters.base import SecurityEventAdapter
+from src.adapters.base import SecurityEventAdapter, generate_event_id
 from src.models import NormalizedEvent, TargetEndpoint
+from src.payload_utils import truncate_payload
 
 # CRS Rule ID range -> attack category
 MODSEC_RULE_CATEGORY_MAP = {
@@ -16,10 +16,6 @@ MODSEC_RULE_CATEGORY_MAP = {
     range(941100, 942000): "Cross-Site Scripting",
     range(930100, 931000): "Path Traversal",
 }
-
-
-def _generate_event_id() -> str:
-    return f"evt-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
 
 class ModSecurityAdapter(SecurityEventAdapter):
@@ -36,7 +32,7 @@ class ModSecurityAdapter(SecurityEventAdapter):
         uri = request_info.get("uri", "UNKNOWN")
 
         return NormalizedEvent(
-            event_id=_generate_event_id(),
+            event_id=generate_event_id(),
             timestamp=transaction.get("time", datetime.now(timezone.utc).isoformat()),
             source="modsecurity",
             attack_category=self._extract_category(messages),
@@ -71,8 +67,8 @@ class ModSecurityAdapter(SecurityEventAdapter):
     def _extract_payload(self, request_info: dict) -> str:
         body = request_info.get("body", "")
         if body:
-            return body[:500]
-        return request_info.get("query_string", "")[:500]
+            return truncate_payload(body)
+        return truncate_payload(request_info.get("query_string", ""))
 
     def _extract_rule_ids(self, messages: list) -> str:
         rule_ids = [
