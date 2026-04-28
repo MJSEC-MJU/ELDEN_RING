@@ -16,6 +16,8 @@ from typing import Optional
 
 import redis
 
+from src import metrics
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,8 +88,10 @@ class RedisPublisher:
         cap = self._memory_backup.maxlen or MAX_BACKUP_SIZE
         was_full = len(self._memory_backup) == cap
         self._memory_backup.append(context)
+        metrics.redis_backup_pending.set(len(self._memory_backup))
         if was_full:
             self._dropped_count += 1
+            metrics.redis_backup_dropped_total.inc()
             logger.warning(
                 f"Memory backup full ({cap}) — dropped oldest "
                 f"(total dropped: {self._dropped_count})"
@@ -119,6 +123,7 @@ class RedisPublisher:
             sent += 1
 
         if sent:
+            metrics.redis_backup_pending.set(len(self._memory_backup))
             logger.info(
                 f"Drained {sent} contexts from memory backup "
                 f"({len(self._memory_backup)} remaining)"

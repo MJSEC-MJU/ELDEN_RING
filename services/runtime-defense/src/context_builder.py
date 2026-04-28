@@ -12,6 +12,7 @@ def build_context(
     cwe: dict,
     source_map: Optional[dict],
     defense_action: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> dict:
     return {
         "context_id": f"ctx-{event.event_id}",
@@ -36,5 +37,6 @@ def build_context(
             "detection_source": event.source,
             "defense_action_taken": defense_action,
             "requires_patch": cwe["cwe_id"] != "UNKNOWN",
+            "trace_id": trace_id,
         },
     }

@@ -11,6 +11,7 @@ FastAPI server that:
 
 import asyncio
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -19,21 +20,20 @@ from typing import Optional
 from fastapi import Depends, FastAPI, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from src import metrics
 from src.auth import verify_webhook_token
 from src.config import settings
-from src.models import NormalizedEvent, TargetEndpoint, ManualEventRequest
-from src.normalizer import EventNormalizer
-from src.cwe_mapping import map_to_cwe
-from src.source_mapper import SourceMapper
 from src.context_builder import build_context
-from src.redis_publisher import RedisPublisher
+from src.cwe_mapping import map_to_cwe
 from src.defense import DefenseManager
+from src.logging_config import configure_logging, reset_trace_id, set_trace_id
+from src.models import ManualEventRequest, NormalizedEvent, TargetEndpoint
+from src.normalizer import EventNormalizer
+from src.redis_publisher import RedisPublisher
+from src.source_mapper import SourceMapper
 
 # ── Logging ──────────────────────────────────────────
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-)
+configure_logging()
 logger = logging.getLogger("runtime-defense")
 
 # ── Background drain task ────────────────────────────
@@ -95,32 +95,54 @@ failed_logs: list[dict] = []
 # ── Pipeline ─────────────────────────────────────────
 async def run_pipeline(event: NormalizedEvent) -> dict:
     """Full pipeline: CWE mapping -> source mapping -> context build -> defense -> Redis."""
-    events_store.append(event)
+    trace_id = uuid.uuid4().hex[:12]
+    trace_token = set_trace_id(trace_id)
+    pipeline_start = time.perf_counter()
 
-    # Step 2: CWE mapping
-    cwe = map_to_cwe(event.attack_category)
+    try:
+        events_store.append(event)
+        metrics.events_total.labels(
+            source=event.source,
+            attack_category=event.attack_category,
+            severity=event.severity,
+        ).inc()
 
-    # Step 3: Source code mapping
-    source_map = source_mapper.map(
-        event.target_endpoint.method, event.target_endpoint.path
-    )
+        cwe = map_to_cwe(event.attack_category)
+        source_map = source_mapper.map(
+            event.target_endpoint.method, event.target_endpoint.path
+        )
 
-    # Step 4 (parallel): Active defense
-    defense_action = await defense_mgr.handle_defense(event)
+        defense_action = await defense_mgr.handle_defense(event)
 
-    # Step 5: Build context package
-    context = build_context(event, cwe, source_map, defense_action)
-    contexts_store.append(context)
+        context = build_context(event, cwe, source_map, defense_action, trace_id=trace_id)
+        contexts_store.append(context)
 
-    # Step 6: Deliver to Phase 2 via Redis
-    redis_pub.publish_context(context)
+        # Sync redis-py call offloaded to a worker thread so the event loop
+        # stays responsive while LPUSH+PUBLISH (and any reconnect retry) run.
+        publish_start = time.perf_counter()
+        await asyncio.to_thread(redis_pub.publish_context, context)
+        metrics.redis_publish_duration_seconds.observe(
+            time.perf_counter() - publish_start
+        )
+        metrics.redis_backup_pending.set(redis_pub.pending_backup_count)
 
-    logger.info(
-        f"Pipeline complete: {event.event_id} | "
-        f"{event.source} | {event.attack_category} | "
-        f"{cwe['cwe_id']} | defense={defense_action}"
-    )
-    return context
+        logger.info(
+            "pipeline_complete",
+            extra={
+                "event_id": event.event_id,
+                "context_id": context["context_id"],
+                "source": event.source,
+                "attack_category": event.attack_category,
+                "cwe_id": cwe["cwe_id"],
+                "defense_action": defense_action,
+            },
+        )
+        return context
+    finally:
+        metrics.pipeline_duration_seconds.labels(source=event.source).observe(
+            time.perf_counter() - pipeline_start
+        )
+        reset_trace_id(trace_token)
 
 
 # ── Event Ingestion Endpoints ────────────────────────

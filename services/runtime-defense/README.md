@@ -109,6 +109,34 @@ Falco/ModSec 웹훅 자체를 잃기 때문에, **Redis 장애에도 readiness �
 - HPA(`runtime-defense-hpa.yaml`): CPU 70% / Mem 80% 임계, 2~5대
 - 스케일다운은 5분 안정화 (메모리 백업 큐 유실 방지)
 
+## 관측성
+
+### 구조화된 JSON 로깅
+
+모든 로그 라인은 stdout 으로 JSON 한 줄씩 출력 (Loki 파싱 친화).
+필드: `timestamp`, `level`, `name`, `message`, `trace_id`, 그리고
+`extra=` 로 전달한 임의 필드. Phase 1 진입 시 12자리 hex trace_id
+를 발급해 같은 요청에서 발생한 모든 로그가 같은 trace_id 를 갖는다.
+
+### 비즈니스 메트릭 (`/metrics`)
+
+| 메트릭 | 타입 | 라벨 | 설명 |
+|---|---|---|---|
+| `runtime_defense_events_total` | Counter | source, attack_category, severity | 이벤트 수신/정규화 카운트 |
+| `runtime_defense_actions_total` | Counter | action | 실행된 능동 방어 조치 |
+| `runtime_defense_pipeline_duration_seconds` | Histogram | source | 파이프라인 E2E 시간 |
+| `runtime_defense_redis_publish_seconds` | Histogram | - | Redis publish 시간 |
+| `runtime_defense_redis_backup_pending` | Gauge | - | 메모리 백업 대기 큐 크기 |
+| `runtime_defense_redis_backup_dropped_total` | Counter | - | 백업 큐 가득 차서 폐기된 수 |
+
+prometheus-fastapi-instrumentator 의 기본 HTTP 메트릭과 함께 노출.
+
+### 비차단 Redis 발행
+
+`redis_pub.publish_context` 는 `asyncio.to_thread` 로 워커 스레드에서
+실행 → Redis I/O 가 이벤트 루프를 막지 않음. 여러 요청을 동시에
+처리해도 Redis 연결 1개의 LPUSH+PUBLISH 가 직렬화되지 않는다.
+
 ## CI 자동화
 
 `services/runtime-defense/**` 변경 시 자동 빌드/배포됨 (dev 브랜치 push)

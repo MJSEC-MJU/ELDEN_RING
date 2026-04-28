@@ -52,3 +52,48 @@ falcosidekick:
 | dev / kind | Low (토큰 미설정 시 인증 비활성, 동작 무영향) |
 | staging | Medium (토큰 활성화 직전까지) |
 | production | **High** (토큰 회전 시점에 동기화 필수) |
+
+---
+
+## H-002: trace_id Phase 2/3/4 전파 합의 필요
+
+**대상**: 이윤태(Phase 2 / Phase 3), 이종윤(Phase 4)
+**연관 Phase 1 작업**: B3-⑤ 구조화된 JSON 로깅
+
+### 배경
+
+Phase 1 의 `run_pipeline` 진입 시점에 12자리 hex `trace_id`를 생성하여:
+
+1. 모든 로그 라인에 `trace_id` 필드로 노출 (구조화 로깅)
+2. Redis 로 발행되는 컨텍스트 패키지의 `metadata.trace_id` 에 포함
+
+각 단계에서 같은 trace_id 로 로그를 검색하면 Phase 1→2→3→4 전체
+요청 경로를 한번에 추적할 수 있다. 단, **현재 Phase 1 만 채워 보내고
+하류 Phase 들은 사용/전파하지 않는다**.
+
+### 요청 사항
+
+각 Phase 가 수신한 컨텍스트의 `metadata.trace_id` 를:
+
+1. 자기 Phase 의 모든 로그 라인에 동일 필드로 포함시켜 발행
+2. 다음 Phase 로 보내는 메시지에 그대로 propagate
+
+```python
+# 예시: Phase 2 worker 의 로그 설정
+trace_id = context["metadata"].get("trace_id", "")
+logger = logger.bind(trace_id=trace_id)  # structlog
+# 또는
+logging.LoggerAdapter(logger, {"trace_id": trace_id})
+```
+
+### 인터페이스 호환성
+
+- 추가형 변경 (additive) — Phase 2 가 무시해도 동작 무영향
+- 필드 누락 시 빈 문자열 fallback. 깨질 일 없음
+
+### 우선순위
+
+| 항목 | 우선순위 |
+|------|----------|
+| 즉시 적용 | Low (현재 Phase 1 단독 추적만 가능, 합의 후 전파해도 늦지 않음) |
+| 운영 사고 시 추적성 | **Medium** — 사고 RCA 가속을 위해 합의 권장 |

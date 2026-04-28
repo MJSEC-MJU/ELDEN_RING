@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from src.adapters.base import SecurityEventAdapter
 from src.models import NormalizedEvent, TargetEndpoint
+from src.payload_utils import truncate_payload
 
 FALCO_CATEGORY_MAP = {
     "shell": "Shell Execution",
@@ -54,7 +55,7 @@ class FalcoAdapter(SecurityEventAdapter):
                 method="SYSCALL",
                 path=output_fields.get("k8s.pod.name", "UNKNOWN"),
             ),
-            payload_sample=raw_log.get("output", ""),
+            payload_sample=truncate_payload(raw_log.get("output", "")),
             source_ip=output_fields.get("fd.sip"),
             blocked=False,
             severity=FALCO_PRIORITY_MAP.get(raw_log.get("priority", ""), "LOW"),
