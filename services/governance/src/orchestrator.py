@@ -5,7 +5,7 @@ import logging
 import redis.asyncio as redis
 
 from .config import settings
-from .git_writer import GitWriter
+from .git_writer import GitWriter, build_defense_branch
 from .k8s_client import K8sClient
 from .manifest_builder import build_image_patch_manifests
 from .models import (
@@ -90,7 +90,7 @@ class Orchestrator:
             )
             req.branch, req.pr_number = branch, pr
         else:
-            req.branch = f"{settings.defense_branch_prefix}{incident}"
+            req.branch = build_defense_branch(settings.defense_branch_prefix, incident)
         req.stage = PromotionStage.GIT_PR
 
         # A layer — wait for Kyverno reports after ArgoCD sync

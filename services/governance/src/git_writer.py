@@ -7,6 +7,11 @@ from github import Github, GithubException
 logger = logging.getLogger(__name__)
 
 
+def build_defense_branch(prefix: str, incident_id: str) -> str:
+    ident = incident_id[4:] if incident_id.startswith("inc-") else incident_id
+    return f"{prefix}{ident}"
+
+
 class GitWriter:
     def __init__(self, repo_full: str, token: str, base_branch: str, branch_prefix: str):
         if not token:
@@ -23,8 +28,7 @@ class GitWriter:
         risk: str,
         validation_summary: str,
     ) -> tuple[str, int]:
-        ident = incident_id[4:] if incident_id.startswith("inc-") else incident_id
-        branch = f"{self.prefix}{ident}"
+        branch = build_defense_branch(self.prefix, incident_id)
         base_sha = self.repo.get_branch(self.base).commit.sha
         try:
             self.repo.create_git_ref(ref=f"refs/heads/{branch}", sha=base_sha)
