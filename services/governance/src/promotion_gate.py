@@ -1,6 +1,7 @@
 import logging
 
 from .k8s_client import K8sClient
+from .metrics import rollbacks_total
 from .models import RiskClass
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ class PromotionGate:
 
     def abort(self, namespace: str, name: str, reason: str) -> None:
         logger.warning("aborting rollout=%s/%s reason=%s", namespace, name, reason)
+        bucket = "slo_breach" if reason.startswith("slo_breach") else "manual"
+        rollbacks_total.labels(reason=bucket).inc()
         body = {"status": {"abort": True, "abortedAt": None}}
         self.k8s.patch_rollout_status(namespace, name, body)
 

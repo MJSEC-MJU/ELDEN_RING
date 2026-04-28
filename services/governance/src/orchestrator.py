@@ -8,6 +8,12 @@ from .config import settings
 from .git_writer import GitWriter, build_defense_branch
 from .k8s_client import K8sClient
 from .manifest_builder import build_image_patch_manifests
+from .metrics import (
+    active_incidents,
+    incidents_total,
+    policy_violations_total,
+    promotion_decisions_total,
+)
 from .models import (
     Phase3Result,
     PromotionRequest,
@@ -64,6 +70,7 @@ class Orchestrator:
         incident = result.incident_id
         logger.info("handling incident=%s image=%s", incident, result.candidate_image)
         if not result.all_passed:
+            incidents_total.labels(stage="rejected", risk="unknown").inc()
             await self._reject_to_retry(result, client)
             return
 
@@ -79,6 +86,8 @@ class Orchestrator:
             reason=f"risk={risk.value}",
         )
         self._state[incident] = req
+        incidents_total.labels(stage=req.stage.value, risk=risk.value).inc()
+        active_incidents.labels(risk=risk.value).inc()
 
         # B layer — open defense-candidate PR
         if self.git:
@@ -99,19 +108,30 @@ class Orchestrator:
         if not gate.passed:
             logger.warning("policy gate FAILED incident=%s violations=%s",
                            incident, gate.violations)
+            for v in gate.violations:
+                policy = v.split("/", 1)[0]
+                policy_violations_total.labels(policy=policy).inc()
+            promotion_decisions_total.labels(decision="rejected").inc()
+            active_incidents.labels(risk=risk.value).dec()
             await self._reject_to_retry(result, client)
             return
 
         # C layer — allow rollout to proceed based on risk
         req.stage = PromotionStage.CANARY_ANALYSIS
+        incidents_total.labels(stage=req.stage.value, risk=risk.value).inc()
         self.promotion_gate.resume_if_allowed(
             req.rollout_namespace, req.rollout_name, req.risk,
         )
         if req.risk == RiskClass.HIGH:
             req.stage = PromotionStage.MANUAL_APPROVAL
+            incidents_total.labels(stage=req.stage.value, risk=risk.value).inc()
+            promotion_decisions_total.labels(decision="manual_pause").inc()
             logger.info("incident=%s awaiting manual approval (high risk)", incident)
         else:
             req.stage = PromotionStage.COMPLETED
+            incidents_total.labels(stage=req.stage.value, risk=risk.value).inc()
+            promotion_decisions_total.labels(decision="auto").inc()
+            active_incidents.labels(risk=risk.value).dec()
 
     async def _reject_to_retry(self, result: Phase3Result, client: redis.Redis) -> None:
         payload = {

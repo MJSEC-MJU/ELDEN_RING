@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: controller
-          image: eldenring/runtime-defense:latest
+          image: ghcr.io/mjsec-mju/elden-runtime-defense:dev-latest
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

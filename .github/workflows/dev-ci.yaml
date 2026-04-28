@@ -1,6 +1,9 @@
 # ============================================================
 # ELDEN RING - Dev Branch CI (GitHub Actions)
-# dev에 머지되면: 변경된 Phase만 빌드 → 이미지 push → 배포
+# dev에 머지되면: 변경된 Phase만 빌드 → ghcr.io 푸시 → 배포
+#
+# Registry: GitHub Container Registry (ghcr.io)
+# Auth: GITHUB_TOKEN (자동, 별도 secret 불필요)
 # ============================================================
 name: Dev CI
 
@@ -8,9 +11,13 @@ on:
   push:
     branches: [dev]
 
+permissions:
+  contents: read
+  packages: write
+
 env:
-  REGISTRY: docker.io
-  ORG: eldenring
+  REGISTRY: ghcr.io
+  ORG: mjsec-mju
 
 jobs:
   # ──────────────────────────────────────
@@ -55,22 +62,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/runtime-defense
           push: true
           tags: |
-            ${{ env.ORG }}/runtime-defense:dev-${{ github.sha }}
-            ${{ env.ORG }}/runtime-defense:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-latest
           cache-from: type=gha,scope=phase1
           cache-to: type=gha,scope=phase1,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/runtime-defense:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 
@@ -82,22 +90,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
-          # K8s 매니페스트가 있으면 적용
           if ls kubernetes/environments/production/runtime-defense*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/production/ -n elden-production
           fi
-          # 이미지 태그 업데이트
           kubectl set image deployment/runtime-defense-controller \
-            controller=${{ env.ORG }}/runtime-defense:dev-${{ github.sha }} \
+            controller=${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-${{ github.sha }} \
             -n elden-production 2>/dev/null || echo "Deployment not found yet - skip image update"
 
   # ──────────────────────────────────────
@@ -113,22 +128,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/secure-coding
           push: true
           tags: |
-            ${{ env.ORG }}/secure-coding:dev-${{ github.sha }}
-            ${{ env.ORG }}/secure-coding:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-secure-coding:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-secure-coding:dev-latest
           cache-from: type=gha,scope=phase2
           cache-to: type=gha,scope=phase2,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/secure-coding:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-secure-coding:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 
@@ -140,14 +156,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
           if ls kubernetes/environments/secure-coding/*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/secure-coding/ -n elden-secure-coding
@@ -166,22 +191,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/recovery-assurance
           push: true
           tags: |
-            ${{ env.ORG }}/recovery-assurance:dev-${{ github.sha }}
-            ${{ env.ORG }}/recovery-assurance:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-recovery-assurance:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-recovery-assurance:dev-latest
           cache-from: type=gha,scope=phase3
           cache-to: type=gha,scope=phase3,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/recovery-assurance:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-recovery-assurance:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 
@@ -193,14 +219,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
           if ls kubernetes/environments/staging/recovery-assurance*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/staging/ -n elden-staging
@@ -219,22 +254,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/governance
           push: true
           tags: |
-            ${{ env.ORG }}/governance:dev-${{ github.sha }}
-            ${{ env.ORG }}/governance:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-governance:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-governance:dev-latest
           cache-from: type=gha,scope=phase4
           cache-to: type=gha,scope=phase4,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/governance:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-governance:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 
@@ -246,14 +282,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Deploy
+        if: steps.kc.outputs.configured == 'true'
         run: |
           if ls kubernetes/environments/governance/*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/governance/ -n elden-governance
@@ -271,13 +316,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set kubeconfig
+        id: kc
         run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
-          if ! kubectl cluster-info > /dev/null 2>&1; then
-            echo "WARNING: No cluster connection - skipping deploy"
-            exit 0
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "WARNING: KUBECONFIG secret not set - skipping deploy"
+          else
+            mkdir -p ~/.kube
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+            if kubectl cluster-info > /dev/null 2>&1; then
+              echo "configured=true" >> $GITHUB_OUTPUT
+            else
+              echo "configured=false" >> $GITHUB_OUTPUT
+              echo "WARNING: Cannot connect to cluster - skipping deploy"
+            fi
           fi
       - name: Apply Base Resources
+        if: steps.kc.outputs.configured == 'true'
         run: |
           kubectl apply -f kubernetes/base/ --recursive
