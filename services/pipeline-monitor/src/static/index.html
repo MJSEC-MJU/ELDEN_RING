@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>ELDEN RING — Pipeline Monitor</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<style>
+  body { background:#0f172a; color:#e2e8f0; font-family:'Inter','Pretendard',sans-serif; }
+  .node-box { border:2px solid; border-radius:10px; padding:10px 14px; min-width:200px; background:#1e293b; box-shadow:0 4px 14px rgba(0,0,0,0.4); }
+  .node-idle    { border-color:#334155; }
+  .node-active  { border-color:#fbbf24; box-shadow:0 0 24px rgba(251,191,36,0.6); }
+  .node-recent  { border-color:#22c55e; box-shadow:0 0 18px rgba(34,197,94,0.45); }
+  .node-rejected{ border-color:#ef4444; box-shadow:0 0 18px rgba(239,68,68,0.5); }
+  .pulse { animation:pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+  .edge   { stroke:#475569; stroke-width:2; fill:none; marker-end:url(#arrow); }
+  .edge.flow { stroke:#22d3ee; stroke-dasharray:8 6; animation:dash 0.6s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset:-28; } }
+  .badge { padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
+  .b-low    { background:#16a34a; color:#fff; }
+  .b-medium { background:#ca8a04; color:#fff; }
+  .b-high   { background:#dc2626; color:#fff; }
+  .b-passed { background:#16a34a; color:#fff; }
+  .b-failed { background:#dc2626; color:#fff; }
+  .b-pending{ background:#64748b; color:#fff; }
+  .tab-btn  { padding:8px 14px; border-bottom:2px solid transparent; cursor:pointer; }
+  .tab-btn.active { border-color:#22d3ee; color:#22d3ee; }
+  pre.json { background:#0b1220; color:#cbd5e1; padding:8px; border-radius:6px; font-size:11px; max-height:240px; overflow:auto; }
+  .scroll-y { overflow-y:auto; }
+</style>
+</head>
+<body class="h-screen flex flex-col">
+
+<header class="px-6 py-3 border-b border-slate-700 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <div class="text-2xl font-bold text-cyan-400">⚔ ELDEN RING</div>
+    <div class="text-slate-400 text-sm">Pipeline Monitor</div>
+  </div>
+  <div class="flex items-center gap-4 text-sm">
+    <div id="conn" class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-slate-500"></span><span>connecting...</span></div>
+    <div class="text-slate-400">incidents <span id="hdr-incidents" class="text-white font-bold">0</span></div>
+    <div class="text-slate-400">events <span id="hdr-events" class="text-white font-bold">0</span></div>
+  </div>
+</header>
+
+<nav class="px-6 border-b border-slate-700 flex gap-2 text-sm">
+  <div class="tab-btn active" data-tab="pipeline">Live Pipeline</div>
+  <div class="tab-btn" data-tab="incidents">Incidents</div>
+  <div class="tab-btn" data-tab="stats">Stats</div>
+</nav>
+
+<main class="flex-1 overflow-hidden">
+
+  <!-- TAB 1: PIPELINE -->
+  <section id="tab-pipeline" class="h-full grid grid-cols-12 gap-4 p-4">
+    <div class="col-span-8 bg-slate-800 rounded-lg p-4 relative">
+      <h2 class="text-sm text-slate-400 mb-3 font-semibold tracking-wide">FLOW</h2>
+      <svg id="flow-svg" viewBox="0 0 1000 500" class="w-full h-[calc(100%-30px)]">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+          </marker>
+          <marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#22d3ee"/>
+          </marker>
+        </defs>
+        <path id="e12" class="edge" d="M 220 100 C 320 100 320 100 420 100" />
+        <path id="e23" class="edge" d="M 580 100 C 680 100 680 100 780 100" />
+        <path id="e34" class="edge" d="M 880 130 C 880 230 880 230 880 320" />
+        <path id="e2r" class="edge" d="M 500 140 C 500 240 220 240 220 140" />
+        <path id="e4r" class="edge" d="M 800 350 C 600 380 250 380 220 140" />
+
+        <foreignObject x="20" y="60" width="200" height="80">
+          <div xmlns="http://www.w3.org/1999/xhtml" id="node-p1" class="node-box node-idle">
+            <div class="text-xs text-cyan-400">Phase 1</div>
+            <div class="font-semibold">Runtime Defense</div>
+            <div class="text-[11px] text-slate-400 mt-1">Falco + ModSec + WAF</div>
+            <div id="ev-p1" class="text-[11px] text-slate-500 mt-1 truncate">idle</div>
+          </div>
+        </foreignObject>
+
+        <foreignObject x="380" y="60" width="200" height="80">
+          <div xmlns="http://www.w3.org/1999/xhtml" id="node-p2" class="node-box node-idle">
+            <div class="text-xs text-cyan-400">Phase 2</div>
+            <div class="font-semibold">Secure Coding</div>
+            <div class="text-[11px] text-slate-400 mt-1">LLM patch + build</div>
+            <div id="ev-p2" class="text-[11px] text-slate-500 mt-1 truncate">idle</div>
+          </div>
+        </foreignObject>
+
+        <foreignObject x="740" y="60" width="200" height="80">
+          <div xmlns="http://www.w3.org/1999/xhtml" id="node-p3" class="node-box node-idle">
+            <div class="text-xs text-cyan-400">Phase 3</div>
+            <div class="font-semibold">Recovery Assurance</div>
+            <div class="text-[11px] text-slate-400 mt-1">exploit/regression/SLO</div>
+            <div id="ev-p3" class="text-[11px] text-slate-500 mt-1 truncate">idle</div>
+          </div>
+        </foreignObject>
+
+        <foreignObject x="740" y="320" width="200" height="100">
+          <div xmlns="http://www.w3.org/1999/xhtml" id="node-p4" class="node-box node-idle">
+            <div class="text-xs text-cyan-400">Phase 4</div>
+            <div class="font-semibold">Governance</div>
+            <div class="text-[11px] text-slate-400 mt-1">Kyverno + ArgoCD + Rollouts</div>
+            <div id="ev-p4" class="text-[11px] text-slate-500 mt-1 truncate">idle</div>
+          </div>
+        </foreignObject>
+
+        <text x="320" y="92" class="text-[11px]" fill="#94a3b8">elden:phase2:context</text>
+        <text x="680" y="92" class="text-[11px]" fill="#94a3b8">elden:phase3:validate</text>
+        <text x="895" y="240" class="text-[11px]" fill="#94a3b8">elden:phase4:promote</text>
+        <text x="380" y="252" class="text-[11px]" fill="#fb923c">elden:phase2:retry</text>
+      </svg>
+    </div>
+    <aside class="col-span-4 bg-slate-800 rounded-lg p-4 flex flex-col">
+      <h2 class="text-sm text-slate-400 mb-3 font-semibold tracking-wide">LIVE EVENTS</h2>
+      <div id="event-log" class="flex-1 scroll-y space-y-2 text-sm pr-1"></div>
+    </aside>
+  </section>
+
+  <!-- TAB 2: INCIDENTS -->
+  <section id="tab-incidents" class="h-full p-4 hidden">
+    <div class="bg-slate-800 rounded-lg p-4 h-full flex flex-col">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm text-slate-400 font-semibold tracking-wide">INCIDENTS (click for detail)</h2>
+        <div class="text-xs text-slate-500">최신순</div>
+      </div>
+      <div class="overflow-auto flex-1">
+        <table class="w-full text-sm">
+          <thead class="text-slate-400 text-xs uppercase border-b border-slate-700">
+            <tr>
+              <th class="text-left py-2">Incident</th>
+              <th class="text-left">CWE</th>
+              <th class="text-left">Risk</th>
+              <th class="text-left">Stage</th>
+              <th class="text-left">Branch</th>
+              <th class="text-left">Started</th>
+            </tr>
+          </thead>
+          <tbody id="incident-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB 3: STATS -->
+  <section id="tab-stats" class="h-full p-4 hidden grid grid-cols-12 gap-4 grid-rows-2">
+    <div class="col-span-3 bg-slate-800 rounded-lg p-4">
+      <div class="text-xs text-slate-400 mb-1">Total Incidents</div>
+      <div id="s-total" class="text-4xl font-bold">0</div>
+    </div>
+    <div class="col-span-3 bg-slate-800 rounded-lg p-4">
+      <div class="text-xs text-slate-400 mb-1">Total Events</div>
+      <div id="s-events" class="text-4xl font-bold">0</div>
+    </div>
+    <div class="col-span-3 bg-slate-800 rounded-lg p-4">
+      <div class="text-xs text-slate-400 mb-1">High-Risk Incidents</div>
+      <div id="s-high" class="text-4xl font-bold text-red-400">0</div>
+    </div>
+    <div class="col-span-3 bg-slate-800 rounded-lg p-4">
+      <div class="text-xs text-slate-400 mb-1">Awaiting Approval</div>
+      <div id="s-pending" class="text-4xl font-bold text-yellow-400">0</div>
+    </div>
+    <div class="col-span-6 bg-slate-800 rounded-lg p-4">
+      <h2 class="text-sm text-slate-400 mb-2">Incidents by CWE</h2>
+      <canvas id="chart-cwe"></canvas>
+    </div>
+    <div class="col-span-6 bg-slate-800 rounded-lg p-4">
+      <h2 class="text-sm text-slate-400 mb-2">Incidents by Risk</h2>
+      <canvas id="chart-risk"></canvas>
+    </div>
+  </section>
+
+</main>
+
+<!-- INCIDENT DETAIL MODAL -->
+<div id="modal" class="fixed inset-0 bg-black/70 hidden items-center justify-center p-6 z-50">
+  <div class="bg-slate-900 rounded-xl border border-slate-700 max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <div class="px-6 py-3 border-b border-slate-700 flex justify-between items-center">
+      <div>
+        <div class="text-xs text-slate-400">incident</div>
+        <div id="m-title" class="text-lg font-bold text-cyan-400">—</div>
+      </div>
+      <button id="m-close" class="text-slate-400 hover:text-white text-2xl">×</button>
+    </div>
+    <div id="m-body" class="overflow-auto p-6 space-y-4"></div>
+  </div>
+</div>
+
+<script>
+const Q = (s)=>document.querySelector(s);
+const QA= (s)=>document.querySelectorAll(s);
+
+// ---- tab switching ----
+QA('.tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
+  QA('.tab-btn').forEach(b=>b.classList.toggle('active', b===btn));
+  const tab=btn.dataset.tab;
+  Q('#tab-pipeline').classList.toggle('hidden', tab!=='pipeline');
+  Q('#tab-incidents').classList.toggle('hidden', tab!=='incidents');
+  Q('#tab-stats').classList.toggle('hidden', tab!=='stats');
+  if (tab==='stats') renderCharts();
+}));
+
+// ---- state ----
+const STATE = { incidents:[], events:[], stats:{} };
+
+function setNode(id, status, summary) {
+  const el = document.getElementById(`node-${id}`);
+  el.classList.remove('node-idle','node-active','node-recent','node-rejected','pulse');
+  el.classList.add(`node-${status}`);
+  if (status==='active') el.classList.add('pulse');
+  document.getElementById(`ev-${id}`).textContent = summary || status;
+}
+function flowEdge(id, on=true) {
+  const e = document.getElementById(id);
+  if (!e) return;
+  e.classList.toggle('flow', on);
+  if (on) setTimeout(()=>e.classList.remove('flow'), 1600);
+}
+
+// channel -> node + edge
+function react(channel, summary) {
+  if (channel==='elden:phase2:context')   { setNode('p1','recent',summary); flowEdge('e12'); setNode('p2','active','processing'); }
+  else if (channel==='elden:phase3:validate'){ setNode('p2','recent',summary); flowEdge('e23'); setNode('p3','active','processing'); }
+  else if (channel==='elden:phase4:promote') { setNode('p3','recent',summary); flowEdge('e34'); setNode('p4','active','processing'); setTimeout(()=>setNode('p4','recent',summary),1500); }
+  else if (channel==='elden:phase2:retry')   { setNode('p4','rejected',summary); flowEdge('e2r'); }
+}
+
+function appendEvent(ev) {
+  STATE.events.unshift(ev);
+  if (STATE.events.length > 200) STATE.events.pop();
+  Q('#hdr-events').textContent = STATE.events.length;
+  const log = Q('#event-log');
+  const row = document.createElement('div');
+  const t = new Date(ev.ts*1000).toLocaleTimeString();
+  const phaseTag = ({'elden:phase2:context':'P1→2','elden:phase3:validate':'P2→3','elden:phase4:promote':'P3→4','elden:phase2:retry':'retry'})[ev.channel] || ev.channel;
+  row.className = 'border-l-2 pl-2 py-1 ' + (ev.channel==='elden:phase2:retry' ? 'border-red-500' : 'border-cyan-500');
+  row.innerHTML = `<div class="text-[11px] text-slate-500">${t} <span class="text-cyan-400">${phaseTag}</span></div>
+                   <div class="text-[12px]">${ev.incident_id||'—'}: <span class="text-slate-300">${ev.summary||''}</span></div>`;
+  log.prepend(row);
+  while (log.children.length > 60) log.removeChild(log.lastChild);
+}
+
+function upsertIncident(inc) {
+  const idx = STATE.incidents.findIndex(i=>i.incident_id===inc.incident_id);
+  if (idx===-1) STATE.incidents.unshift(inc);
+  else STATE.incidents[idx] = {...STATE.incidents[idx], ...inc};
+  Q('#hdr-incidents').textContent = STATE.incidents.length;
+  renderIncidentTable();
+}
+
+function badge(v) { if (!v) return ''; return `<span class="badge b-${v.toLowerCase()}">${v}</span>`; }
+
+function renderIncidentTable() {
+  const rows = STATE.incidents.map(i=>{
+    const t = new Date(i.started_at*1000).toLocaleTimeString();
+    return `<tr class="hover:bg-slate-700/40 cursor-pointer border-b border-slate-800" onclick="openModal('${i.incident_id}')">
+      <td class="py-2 font-mono text-xs">${i.incident_id}</td>
+      <td>${i.cwe_id||'—'}</td>
+      <td>${badge(i.risk)}</td>
+      <td><span class="text-cyan-300">${i.stage||'—'}</span></td>
+      <td class="text-xs">${i.branch||'—'}</td>
+      <td class="text-xs text-slate-400">${t}</td>
+    </tr>`;
+  }).join('');
+  Q('#incident-rows').innerHTML = rows || '<tr><td colspan="6" class="py-6 text-center text-slate-500">아직 incident 없음</td></tr>';
+}
+
+function openModal(incidentId) {
+  fetch('/api/incidents').then(r=>r.json()).then(list=>{
+    const inc = list.find(i=>i.incident_id===incidentId);
+    if (!inc) return;
+    Q('#m-title').textContent = inc.incident_id;
+    const p1 = inc.phase1 || {};
+    const p1ai = p1.attack_info || {};
+    const p1tg = p1.target || {};
+    const p1md = p1.metadata || {};
+    const p2 = inc.phase2 || {};
+    const p3 = inc.phase3 || {};
+    Q('#m-body').innerHTML = `
+      <div class="grid grid-cols-3 gap-3">
+        <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Risk</div>${badge(inc.risk)||'—'}</div>
+        <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Stage</div><div class="text-cyan-300">${inc.stage||'—'}</div></div>
+        <div class="bg-slate-800 rounded p-3"><div class="text-xs text-slate-400">Branch</div><div class="font-mono text-xs">${inc.branch||'—'}</div></div>
+      </div>
+
+      <section class="bg-slate-800 rounded p-4 border-l-4 border-cyan-500">
+        <h3 class="font-bold mb-2">⚔ Phase 1 — Runtime Defense</h3>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div><span class="text-slate-400">Category:</span> ${p1ai.category||'—'}</div>
+          <div><span class="text-slate-400">CWE:</span> ${p1ai.cwe_id||'—'} ${p1ai.cwe_name? '— '+p1ai.cwe_name:''}</div>
+          <div><span class="text-slate-400">OWASP:</span> ${p1ai.owasp_category||'—'}</div>
+          <div><span class="text-slate-400">Severity:</span> ${badge(p1md.severity)||'—'}</div>
+          <div class="col-span-2"><span class="text-slate-400">Endpoint:</span> ${(p1tg.endpoint||{}).method||'?'} ${(p1tg.endpoint||{}).path||'?'}</div>
+          <div class="col-span-2"><span class="text-slate-400">Source mapping:</span> <span class="font-mono text-xs">${(p1tg.source_mapping||{}).file||'—'}::${(p1tg.source_mapping||{}).function||'—'} (L${(p1tg.source_mapping||{}).line_start||'?'}-${(p1tg.source_mapping||{}).line_end||'?'})</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Payload:</span> <code class="bg-slate-900 px-2 py-1 rounded text-xs">${(p1ai.payload_sample||'').replace(/[<>&]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;'})[c])}</code></div>
+          <div><span class="text-slate-400">Source IP:</span> ${p1ai.source_ip||'—'}</div>
+          <div><span class="text-slate-400">Defense:</span> ${p1md.defense_action_taken||'—'}</div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800 rounded p-4 border-l-4 border-purple-500">
+        <h3 class="font-bold mb-2">🔧 Phase 2 — Secure Coding (Patch)</h3>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div><span class="text-slate-400">Patch ID:</span> <span class="font-mono text-xs">${p2.patch_id||'—'}</span></div>
+          <div><span class="text-slate-400">Status:</span> ${p2.patch_status||'—'}</div>
+          <div class="col-span-2"><span class="text-slate-400">Target:</span> <span class="font-mono text-xs">${p2.target_file||'—'}::${p2.target_function||'—'}</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Candidate image:</span> <span class="font-mono text-xs break-all">${p2.candidate_image||'—'}</span></div>
+          <div class="col-span-2"><span class="text-slate-400">Root cause:</span> ${(p2.analysis_summary||{}).root_cause||'—'}</div>
+          <div class="col-span-2"><span class="text-slate-400">Fix strategy:</span> ${(p2.analysis_summary||{}).fix_strategy||'—'}</div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800 rounded p-4 border-l-4 border-emerald-500">
+        <h3 class="font-bold mb-2">🛡 Phase 3 — Recovery Assurance (Validation)</h3>
+        <div class="flex gap-3 text-sm">
+          <div>Exploit replay: ${badge(p3.exploit)||'—'}</div>
+          <div>Regression: ${badge(p3.regression)||'—'}</div>
+          <div>SLO: ${badge(p3.slo)||'—'}</div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800 rounded p-4 border-l-4 border-orange-500">
+        <h3 class="font-bold mb-2">⚖ Phase 4 — Governance</h3>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div><span class="text-slate-400">Risk class:</span> ${badge(inc.risk)||'—'}</div>
+          <div><span class="text-slate-400">Stage:</span> ${inc.stage||'—'}</div>
+          <div class="col-span-2"><span class="text-slate-400">Branch:</span> <span class="font-mono text-xs">${inc.branch||'—'}</span></div>
+        </div>
+      </section>
+
+      <section class="bg-slate-800 rounded p-4">
+        <h3 class="font-bold mb-2 text-sm">⏱ Timeline</h3>
+        <ul class="text-xs space-y-1">${(inc.timeline||[]).map(t=>`<li><span class="text-slate-500">${new Date(t.ts*1000).toLocaleTimeString()}</span> — ${t.channel}</li>`).join('')}</ul>
+      </section>
+    `;
+    Q('#modal').classList.remove('hidden');
+    Q('#modal').classList.add('flex');
+  });
+}
+window.openModal = openModal;
+Q('#m-close').addEventListener('click', ()=>{
+  Q('#modal').classList.add('hidden');
+  Q('#modal').classList.remove('flex');
+});
+
+// ---- charts ----
+let chartCwe, chartRisk;
+function renderCharts() {
+  const s = STATE.stats;
+  Q('#s-total').textContent = s.total_incidents||0;
+  Q('#s-events').textContent = s.total_events||0;
+  Q('#s-high').textContent = (s.by_risk||{}).high || 0;
+  Q('#s-pending').textContent = (s.by_stage||{}).manual_approval || 0;
+
+  const cweLabels = Object.keys(s.by_cwe||{});
+  const cweData   = Object.values(s.by_cwe||{});
+  if (chartCwe) chartCwe.destroy();
+  chartCwe = new Chart(Q('#chart-cwe').getContext('2d'), {
+    type: 'bar',
+    data: { labels: cweLabels.length?cweLabels:['—'], datasets:[{ data: cweData.length?cweData:[0], backgroundColor:'#22d3ee' }]},
+    options: { plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ color:'#94a3b8' } }, x:{ ticks:{ color:'#94a3b8' } } } }
+  });
+  const riskLabels = ['low','medium','high'];
+  const riskData = riskLabels.map(k => (s.by_risk||{})[k]||0);
+  if (chartRisk) chartRisk.destroy();
+  chartRisk = new Chart(Q('#chart-risk').getContext('2d'), {
+    type: 'doughnut',
+    data: { labels: riskLabels, datasets:[{ data: riskData, backgroundColor:['#16a34a','#ca8a04','#dc2626'] }]},
+    options: { plugins:{legend:{ labels:{ color:'#cbd5e1' } } } }
+  });
+}
+
+// ---- WebSocket ----
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = ()=>{ Q('#conn').innerHTML='<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span>connected</span>'; };
+  ws.onclose= ()=>{ Q('#conn').innerHTML='<span class="w-2 h-2 rounded-full bg-red-500"></span><span>disconnected</span>'; setTimeout(connect, 2000); };
+  ws.onmessage = (m)=>{
+    const d = JSON.parse(m.data);
+    if (d.type === 'snapshot') {
+      STATE.incidents = d.incidents || [];
+      STATE.events = (d.events || []).slice().reverse();
+      STATE.stats = d.stats || {};
+      Q('#hdr-events').textContent = STATE.events.length;
+      Q('#hdr-incidents').textContent = STATE.incidents.length;
+      renderIncidentTable();
+    } else if (d.type === 'event') {
+      appendEvent(d.event);
+      react(d.event.channel, d.event.summary);
+    } else if (d.type === 'incident_upsert') {
+      upsertIncident(d.incident);
+    }
+  };
+}
+
+// poll stats every 5s for chart freshness
+setInterval(()=>{
+  fetch('/api/stats').then(r=>r.json()).then(s=>{ STATE.stats = s; if (!Q('#tab-stats').classList.contains('hidden')) renderCharts(); });
+}, 5000);
+
+connect();
+</script>
+
+</body>
+</html>
