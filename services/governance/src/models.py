@@ -35,6 +35,7 @@ class Phase3Result(BaseModel):
     manifests: list[dict[str, Any]] = Field(default_factory=list)
 
     event_id: str | None = None
+    job_id: str | None = None
     patch_id: str | None = None
     cwe_id: str | None = None
     target_file: str | None = None
@@ -67,12 +68,13 @@ class Phase3Result(BaseModel):
             slo=ValidationStatus(payload["slo"]),
             manifests=payload.get("manifests", []),
             event_id=p2["event_id"],
+            job_id=p2.get("job_id"),
             patch_id=p2["patch_id"],
             cwe_id=p2["cwe_id"],
             target_file=p2["target_file"],
             target_function=p2["target_function"],
             change_summary=p2.get("change_summary"),
-            severity=payload.get("severity"),
+            severity=payload.get("severity") or p2.get("severity"),
         )
 
 

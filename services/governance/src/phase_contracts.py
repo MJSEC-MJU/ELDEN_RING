@@ -20,6 +20,7 @@ class Phase2AnalysisSummary(BaseModel):
 
 
 class Phase2Result(BaseModel):
+    job_id: str | None = None
     context_id: str
     event_id: str
     patch_id: str
@@ -28,6 +29,7 @@ class Phase2Result(BaseModel):
     target_function: str
     patch_file: str
     candidate_image: str
+    severity: Severity | None = None
     build_log: str | None = None
     analysis_summary: Phase2AnalysisSummary
     change_summary: dict[str, Any] | None = None
