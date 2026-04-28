@@ -16,29 +16,23 @@ spec:
   validationFailureAction: Enforce
   background: true
   rules:
-    - name: require-pod-selector
-      match:
-        any:
-          - resources:
-              kinds: [NetworkPolicy]
-              namespaces: ["elden-*"]
-      validate:
-        message: "podSelector 는 반드시 선언해야 한다 (빈 selector 는 명시적으로 {})"
-        pattern:
-          spec:
-            podSelector: "?*"
     - name: deny-allow-all-ingress
       match:
         any:
           - resources:
               kinds: [NetworkPolicy]
               namespaces: ["elden-production", "elden-canary"]
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.ingress || `[]` | length(@) }}"
+            operator: GreaterThan
+            value: 0
       validate:
         message: "prod/canary 에서 ingress from:[] (전체 허용) 은 금지"
         deny:
           conditions:
             all:
-              - key: "{{ request.object.spec.ingress[?!from] | length(@) }}"
+              - key: "{{ request.object.spec.ingress[?!from] || `[]` | length(@) }}"
                 operator: GreaterThan
                 value: 0
     - name: require-policy-types

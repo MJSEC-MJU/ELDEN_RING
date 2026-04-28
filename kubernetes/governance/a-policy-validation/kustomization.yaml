@@ -9,3 +9,4 @@ resources:
   - policies/no-conflict-with-existing.yaml
   - policies/rbac-escalation-guard.yaml
   - policyexception-elden-system.yaml
+  - policyexception-system-rbac.yaml

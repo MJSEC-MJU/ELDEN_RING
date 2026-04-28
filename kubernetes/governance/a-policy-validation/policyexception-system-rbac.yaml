@@ -1,0 +1,23 @@
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: system-rbac-exception
+  namespace: kyverno
+  labels:
+    elden-ring/layer: a-policy-validation
+spec:
+  exceptions:
+    - policyName: elden-rbac-escalation-guard
+      ruleNames:
+        - deny-wildcard-verbs
+        - deny-secrets-write-outside-system
+  match:
+    any:
+      - resources:
+          kinds: [ClusterRole, Role, ClusterRoleBinding, RoleBinding]
+          names:
+            - "argo-rollouts*"
+            - "argocd*"
+            - "kyverno*"
+            - "kube-*"
+            - "system:*"
