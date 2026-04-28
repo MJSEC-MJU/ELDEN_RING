@@ -17,3 +17,6 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+
+# Local kind/docker image cache (used by build → kind load workflow)
+.cache/
