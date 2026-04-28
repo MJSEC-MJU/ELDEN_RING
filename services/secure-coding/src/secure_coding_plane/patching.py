@@ -187,7 +187,7 @@ class SecureCodingPatchEngine:
                     "type": "object",
                     "properties": {"security_fix": {"type": "string"}},
                     "required": ["security_fix"],
-                    "additionalProperties": True,
+                    "additionalProperties": False,
                 },
             },
             "required": ["patched_snippet", "change_summary"],
