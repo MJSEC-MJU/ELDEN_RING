@@ -1,0 +1,93 @@
+# Phase 3 — Recovery Assurance controller
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recovery-assurance
+  namespace: elden-staging
+  labels:
+    app: recovery-assurance
+    elden-ring/plane: recovery-assurance
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recovery-assurance
+  template:
+    metadata:
+      labels:
+        app: recovery-assurance
+        elden-ring/plane: recovery-assurance
+    spec:
+      serviceAccountName: recovery-assurance-sa
+      containers:
+        - name: api
+          image: ghcr.io/mjsec-mju/elden-recovery-assurance:dev-latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: REDIS_URL
+              value: redis://redis-master.elden-monitoring:6379/0
+            - name: RA_VALIDATE_CHANNEL
+              value: elden:phase3:validate
+            - name: RA_PROMOTE_CHANNEL
+              value: elden:phase4:promote
+            - name: RA_RETRY_CHANNEL
+              value: elden:phase2:retry
+          readinessProbe:
+            httpGet:
+              path: /api/v1/recovery-assurance/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/recovery-assurance/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+        - name: worker
+          image: ghcr.io/mjsec-mju/elden-recovery-assurance:dev-latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "worker"]
+          env:
+            - name: REDIS_URL
+              value: redis://redis-master.elden-monitoring:6379/0
+            - name: RA_VALIDATE_CHANNEL
+              value: elden:phase3:validate
+            - name: RA_PROMOTE_CHANNEL
+              value: elden:phase4:promote
+            - name: RA_RETRY_CHANNEL
+              value: elden:phase2:retry
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recovery-assurance
+  namespace: elden-staging
+  labels:
+    app: recovery-assurance
+    elden-ring/plane: recovery-assurance
+spec:
+  selector:
+    app: recovery-assurance
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  type: ClusterIP
