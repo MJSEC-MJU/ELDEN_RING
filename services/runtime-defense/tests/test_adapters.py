@@ -164,3 +164,87 @@ class TestFalcoAdapter:
         assert event.attack_category == "Suspicious Network"
         assert event.severity == "MEDIUM"
         assert event.source_ip == "10.0.0.99"
+
+
+# ── Adapter edge cases / regression guards ─────────────
+
+
+class TestModSecurityRuleIDBoundaries:
+    """Verify CRS rule ID range mapping at boundaries — easy to break by typo."""
+
+    def setup_method(self):
+        self.adapter = ModSecurityAdapter()
+
+    def _log(self, rule_id: str | int, severity: str = "CRITICAL") -> dict:
+        return {
+            "transaction": {
+                "time": "2026-04-08T14:30:00Z",
+                "remote_address": "1.2.3.4",
+                "request": {"method": "GET", "uri": "/", "query_string": ""},
+            },
+            "audit_data": {
+                "messages": [{"details": {"ruleId": rule_id, "severity": severity}}]
+            },
+        }
+
+    @pytest.mark.parametrize("rule_id,expected", [
+        # SQL Injection range: 942100 - 942999
+        (942100, "SQL Injection"),
+        (942500, "SQL Injection"),
+        (942999, "SQL Injection"),
+        # XSS range: 941100 - 941999
+        (941100, "Cross-Site Scripting"),
+        (941999, "Cross-Site Scripting"),
+        # Path Traversal range: 930100 - 930999
+        (930100, "Path Traversal"),
+        (930999, "Path Traversal"),
+    ])
+    def test_in_range_categorized(self, rule_id, expected):
+        event = self.adapter.parse(self._log(rule_id))
+        assert event.attack_category == expected
+
+    @pytest.mark.parametrize("rule_id", [
+        942099,  # just below SQLi
+        943000,  # just above SQLi
+        941099,  # just below XSS
+        942000,  # just above XSS (and just below SQLi)
+        930099,  # just below Path Traversal
+        931000,  # just above Path Traversal
+        0,
+        999999,
+    ])
+    def test_out_of_range_unknown(self, rule_id):
+        event = self.adapter.parse(self._log(rule_id))
+        assert event.attack_category == "Unknown Web Attack"
+
+    def test_rule_id_as_string_accepted(self):
+        """Some log shippers send ruleId as string — must coerce to int."""
+        event = self.adapter.parse(self._log("942100"))
+        assert event.attack_category == "SQL Injection"
+
+    def test_severity_escalates_to_highest(self):
+        """Mixed severities must escalate to the most critical one."""
+        log = self._log(942100)
+        log["audit_data"]["messages"] = [
+            {"details": {"ruleId": 942100, "severity": "WARNING"}},
+            {"details": {"ruleId": 942101, "severity": "CRITICAL"}},
+            {"details": {"ruleId": 942102, "severity": "WARNING"}},
+        ]
+        event = self.adapter.parse(log)
+        assert event.severity == "CRITICAL"
+
+    def test_missing_severity_defaults_medium(self):
+        log = self._log(942100, severity="")
+        event = self.adapter.parse(log)
+        assert event.severity == "MEDIUM"
+
+    def test_missing_messages_returns_unknown(self):
+        log = self._log(942100)
+        log["audit_data"]["messages"] = []
+        event = self.adapter.parse(log)
+        assert event.attack_category == "Unknown Web Attack"
+
+    def test_blocked_flag_always_true(self):
+        """ModSecurity in On mode (per configmap) blocks every detected request."""
+        event = self.adapter.parse(self._log(942100))
+        assert event.blocked is True

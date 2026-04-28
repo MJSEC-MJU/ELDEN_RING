@@ -29,9 +29,22 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: runtime-defense-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: controller
           image: eldenring/runtime-defense:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 8080
               name: http
@@ -53,6 +66,11 @@ spec:
               value: "elden-production"
             - name: LOG_LEVEL
               value: "INFO"
+            - name: WEBHOOK_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: runtime-defense-secrets
+                  key: webhook-auth-token
           readinessProbe:
             httpGet:
               path: /readyz
@@ -69,10 +87,21 @@ spec:
             - name: route-map
               mountPath: /config
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: kube-cache
+              mountPath: /home/app/.kube
       volumes:
         - name: route-map
           configMap:
             name: route-map
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: kube-cache
+          emptyDir:
+            sizeLimit: 32Mi
 ---
 apiVersion: v1
 kind: Service

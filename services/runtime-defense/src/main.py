@@ -14,9 +14,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from src.auth import verify_webhook_token
 from src.config import settings
 from src.models import NormalizedEvent, TargetEndpoint, ManualEventRequest
 from src.normalizer import EventNormalizer
@@ -86,7 +87,7 @@ async def run_pipeline(event: NormalizedEvent) -> dict:
 
 # ── Event Ingestion Endpoints ────────────────────────
 
-@app.post("/api/v1/modsec-events")
+@app.post("/api/v1/modsec-events", dependencies=[Depends(verify_webhook_token)])
 async def receive_modsec_event(raw_log: dict):
     """Receive ModSecurity audit log (from Fluent Bit or log collector)."""
     try:
@@ -99,7 +100,7 @@ async def receive_modsec_event(raw_log: dict):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/v1/falco-events")
+@app.post("/api/v1/falco-events", dependencies=[Depends(verify_webhook_token)])
 async def receive_falco_event(raw_log: dict):
     """Receive Falco Sidekick webhook event."""
     try:
@@ -112,7 +113,7 @@ async def receive_falco_event(raw_log: dict):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.post("/api/v1/events/manual")
+@app.post("/api/v1/events/manual", dependencies=[Depends(verify_webhook_token)])
 async def receive_manual_event(req: ManualEventRequest):
     """Manual event injection for demo purposes."""
     event = NormalizedEvent(

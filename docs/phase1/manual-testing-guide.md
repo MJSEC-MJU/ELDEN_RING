@@ -125,11 +125,25 @@ kubectl logs -f -n elden-production \
 
 ## 5. 이벤트 파이프라인 테스트
 
+> **인증 필요**: 이벤트 주입 엔드포인트(`/api/v1/modsec-events`,
+> `/api/v1/falco-events`, `/api/v1/events/manual`)는 Bearer 토큰
+> 인증이 적용되어 있다. 클러스터에서 현재 토큰 조회:
+>
+> ```bash
+> TOKEN=$(kubectl get secret runtime-defense-secrets \
+>   -n elden-production \
+>   -o jsonpath='{.data.webhook-auth-token}' | base64 -d)
+> ```
+>
+> 로컬에서 `WEBHOOK_AUTH_TOKEN` 미설정으로 컨트롤러를 띄운 경우
+> 인증 비활성 모드라 헤더를 생략해도 된다 (시작 로그 경고로 확인).
+
 ### 수동 이벤트 주입
 
 SQLi:
 ```bash
 curl -X POST http://localhost:8080/api/v1/events/manual \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "attack_category": "SQL Injection",
@@ -143,6 +157,7 @@ curl -X POST http://localhost:8080/api/v1/events/manual \
 XSS:
 ```bash
 curl -X POST http://localhost:8080/api/v1/events/manual \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "attack_category": "Cross-Site Scripting",
@@ -156,6 +171,7 @@ curl -X POST http://localhost:8080/api/v1/events/manual \
 Path Traversal:
 ```bash
 curl -X POST http://localhost:8080/api/v1/events/manual \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "attack_category": "Path Traversal",

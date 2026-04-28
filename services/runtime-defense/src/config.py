@@ -16,6 +16,9 @@ class Settings:
 
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 
+    # Webhook auth (Bearer token). Empty value disables enforcement (dev-only).
+    WEBHOOK_AUTH_TOKEN: str = os.environ.get("WEBHOOK_AUTH_TOKEN", "")
+
     # Defense thresholds
     IP_BLOCK_THRESHOLD: int = int(os.environ.get("IP_BLOCK_THRESHOLD", "3"))
     ENDPOINT_DISABLE_THRESHOLD: int = int(os.environ.get("ENDPOINT_DISABLE_THRESHOLD", "5"))
