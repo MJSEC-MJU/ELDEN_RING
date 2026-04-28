@@ -1,6 +1,9 @@
 # ============================================================
 # ELDEN RING - Dev Branch CI (GitHub Actions)
-# dev에 머지되면: 변경된 Phase만 빌드 → 이미지 push → 배포
+# dev에 머지되면: 변경된 Phase만 빌드 → ghcr.io 푸시 → 배포
+#
+# Registry: GitHub Container Registry (ghcr.io)
+# Auth: GITHUB_TOKEN (자동, 별도 secret 불필요)
 # ============================================================
 name: Dev CI
 
@@ -8,9 +11,13 @@ on:
   push:
     branches: [dev]
 
+permissions:
+  contents: read
+  packages: write
+
 env:
-  REGISTRY: docker.io
-  ORG: eldenring
+  REGISTRY: ghcr.io
+  ORG: mjsec-mju
 
 jobs:
   # ──────────────────────────────────────
@@ -55,22 +62,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/runtime-defense
           push: true
           tags: |
-            ${{ env.ORG }}/runtime-defense:dev-${{ github.sha }}
-            ${{ env.ORG }}/runtime-defense:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-latest
           cache-from: type=gha,scope=phase1
           cache-to: type=gha,scope=phase1,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/runtime-defense:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 
@@ -91,13 +99,11 @@ jobs:
           fi
       - name: Deploy
         run: |
-          # K8s 매니페스트가 있으면 적용
           if ls kubernetes/environments/production/runtime-defense*.yaml 2>/dev/null; then
             kubectl apply -f kubernetes/environments/production/ -n elden-production
           fi
-          # 이미지 태그 업데이트
           kubectl set image deployment/runtime-defense-controller \
-            controller=${{ env.ORG }}/runtime-defense:dev-${{ github.sha }} \
+            controller=${{ env.REGISTRY }}/${{ env.ORG }}/elden-runtime-defense:dev-${{ github.sha }} \
             -n elden-production 2>/dev/null || echo "Deployment not found yet - skip image update"
 
   # ──────────────────────────────────────
@@ -113,22 +119,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/secure-coding
           push: true
           tags: |
-            ${{ env.ORG }}/secure-coding:dev-${{ github.sha }}
-            ${{ env.ORG }}/secure-coding:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-secure-coding:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-secure-coding:dev-latest
           cache-from: type=gha,scope=phase2
           cache-to: type=gha,scope=phase2,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/secure-coding:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-secure-coding:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 
@@ -166,22 +173,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/recovery-assurance
           push: true
           tags: |
-            ${{ env.ORG }}/recovery-assurance:dev-${{ github.sha }}
-            ${{ env.ORG }}/recovery-assurance:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-recovery-assurance:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-recovery-assurance:dev-latest
           cache-from: type=gha,scope=phase3
           cache-to: type=gha,scope=phase3,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/recovery-assurance:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-recovery-assurance:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 
@@ -219,22 +227,23 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: services/governance
           push: true
           tags: |
-            ${{ env.ORG }}/governance:dev-${{ github.sha }}
-            ${{ env.ORG }}/governance:dev-latest
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-governance:dev-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.ORG }}/elden-governance:dev-latest
           cache-from: type=gha,scope=phase4
           cache-to: type=gha,scope=phase4,mode=max
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.ORG }}/governance:dev-${{ github.sha }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.ORG }}/elden-governance:dev-${{ github.sha }}
           severity: HIGH,CRITICAL
           exit-code: 0
 

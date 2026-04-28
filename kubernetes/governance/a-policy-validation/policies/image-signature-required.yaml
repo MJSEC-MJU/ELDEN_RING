@@ -25,11 +25,11 @@ spec:
               kinds: [Pod]
               namespaces: ["elden-canary", "elden-production"]
       validate:
-        message: "승인된 레지스트리(docker.io/eldenring, ghcr.io/mjsec-mju)의 이미지만 허용"
+        message: "승인된 레지스트리(ghcr.io/mjsec-mju)의 이미지만 허용"
         pattern:
           spec:
             containers:
-              - image: "docker.io/eldenring/* | ghcr.io/mjsec-mju/*"
+              - image: "ghcr.io/mjsec-mju/*"
     - name: verify-cosign-signature
       match:
         any:
@@ -38,7 +38,6 @@ spec:
               namespaces: ["elden-canary", "elden-production"]
       verifyImages:
         - imageReferences:
-            - "docker.io/eldenring/*"
             - "ghcr.io/mjsec-mju/*"
           mutateDigest: true
           required: true
