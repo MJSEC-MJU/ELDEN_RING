@@ -1,0 +1,238 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "grafana" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "elden-governance-promotion",
+  "title": "ELDEN RING — Governance Promotion",
+  "tags": ["elden-ring", "phase4", "governance"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "prometheus" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Active incidents",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "textMode": "value_and_name"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (risk) (governance_active_incidents)",
+          "legendFormat": "{{risk}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Promotion decisions (last 24h)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "textMode": "value_and_name"
+      },
+      "targets": [
+        {
+          "expr": "sum by (decision) (increase(governance_promotion_decisions_total[24h]))",
+          "legendFormat": "{{decision}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Rollbacks (last 24h)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (increase(governance_rollbacks_total[24h]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Policy violations (last 24h)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum (increase(governance_policy_violations_total[24h]))",
+          "legendFormat": "violations",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Incidents by stage (rate)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } },
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (stage) (rate(governance_incidents_total[5m]))",
+          "legendFormat": "{{stage}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "Risk class distribution (last 1h)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] } },
+      "targets": [
+        {
+          "expr": "sum by (risk) (increase(governance_incidents_total[1h]))",
+          "legendFormat": "{{risk}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Policy violations by policy",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [
+        {
+          "expr": "sum by (policy) (rate(governance_policy_violations_total[10m]))",
+          "legendFormat": "{{policy}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Rollouts canary phase (Argo Rollouts)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "description": "rollout_phase value: 0=Healthy 1=Progressing 2=Paused 3=Degraded 4=Aborted",
+      "targets": [
+        {
+          "expr": "max by (name, namespace, phase) (rollout_phase{namespace=~\"elden-canary|elden-production\"})",
+          "legendFormat": "{{namespace}}/{{name}} {{phase}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Orchestrator HTTP latency p95 (FastAPI)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(http_request_duration_seconds_bucket{job=~\".*governance.*\"}[5m])))",
+          "legendFormat": "{{handler}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Incidents currently in flight (orchestrator state)",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "description": "Live snapshot of governance_active_incidents by risk. For full incident list, query GET /incidents API.",
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "expr": "governance_active_incidents",
+          "legendFormat": "{{risk}}",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ]
+    }
+  ]
+}
