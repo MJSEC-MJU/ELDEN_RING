@@ -63,8 +63,11 @@ def client(monkeypatch):
     monkeypatch.setattr(settings, "WEBHOOK_AUTH_TOKEN", VALID_TOKEN)
 
     # Replace the live Redis client with fakeredis so LPUSH/PUBLISH succeed.
+    # Also seed the cached up-state so /diagnostics — which now reads cached
+    # state to stay non-blocking during outages — reports the swap honestly.
     fake = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(redis_pub, "client", fake)
+    monkeypatch.setattr(redis_pub, "_was_up", True)
 
     # The pipeline accumulates state in module-level lists; reset them so
     # each test starts clean.

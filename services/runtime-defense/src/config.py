@@ -40,6 +40,14 @@ class Settings:
     MEMORY_BACKUP_MAX_SIZE: int = _int_env("MEMORY_BACKUP_MAX_SIZE", 1000)
     DRAIN_INTERVAL_SECONDS: int = _int_env("DRAIN_INTERVAL_SECONDS", 30)
 
+    # Defense apply_* short-circuit (test/dev only). When False, the active
+    # defense layer logs the intended action but skips the K8s API call.
+    # The kubernetes-python client is synchronous and blocks the asyncio
+    # event loop on each HTTP attempt + urllib3 retries; outside a real
+    # cluster this dominates the per-event budget and crowds out the
+    # publish path we're trying to measure. Production leaves this True.
+    DEFENSE_APPLY_ENABLED: bool = os.environ.get("DEFENSE_APPLY_ENABLED", "true").lower() != "false"
+
     # Adapter payload cap (bytes). Limits Redis/Phase 2 payload size.
     MAX_PAYLOAD_BYTES: int = _int_env("MAX_PAYLOAD_BYTES", 1024)
 

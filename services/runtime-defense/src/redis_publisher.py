@@ -12,6 +12,8 @@ The drain loop runs as a background asyncio task started in
 import collections
 import json
 import logging
+import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import redis
@@ -39,6 +41,9 @@ class RedisPublisher:
             maxlen=MAX_BACKUP_SIZE
         )
         self._dropped_count = 0
+        self._last_ping_seconds: Optional[float] = None
+        self._last_outage_at: Optional[datetime] = None
+        self._was_up: Optional[bool] = None
         self._connect()
 
     def _connect(self) -> bool:
@@ -50,12 +55,15 @@ class RedisPublisher:
                 socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT,
                 socket_timeout=settings.REDIS_OP_TIMEOUT,
             )
+            t0 = time.perf_counter()
             self.client.ping()
+            self._mark_state(up=True, ping_seconds=time.perf_counter() - t0)
             logger.info(f"Connected to Redis at {self.host}:{self.port}")
             return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             logger.warning(f"Cannot connect to Redis at {self.host}:{self.port}: {e}")
             self.client = None
+            self._mark_state(up=False, ping_seconds=None)
             return False
 
     def _try_publish(self, context: dict) -> bool:
@@ -129,15 +137,56 @@ class RedisPublisher:
         return sent
 
     def is_connected(self) -> bool:
-        """Probe connection. Refreshes self.client on failure."""
+        """Probe connection. Refreshes self.client on failure.
+
+        Side effects: updates ``_last_ping_seconds``, ``_last_outage_at``,
+        and the ``redis_up`` / ``redis_last_ping_seconds`` Prometheus gauges.
+        ``_last_outage_at`` is stamped on the up→down transition so the
+        watcher/diagnostics consumer can compute drain duration relative to
+        the most recent outage.
+        """
         if self.client is None:
+            self._mark_state(up=False, ping_seconds=None)
             return False
         try:
+            t0 = time.perf_counter()
             self.client.ping()
+            elapsed = time.perf_counter() - t0
+            self._mark_state(up=True, ping_seconds=elapsed)
             return True
         except (redis.ConnectionError, redis.TimeoutError):
             self.client = None
+            self._mark_state(up=False, ping_seconds=None)
             return False
+
+    def _mark_state(self, up: bool, ping_seconds: Optional[float]) -> None:
+        if self._was_up is True and up is False:
+            self._last_outage_at = datetime.now(timezone.utc)
+        self._was_up = up
+        self._last_ping_seconds = ping_seconds
+        metrics.redis_up.set(1 if up else 0)
+        if ping_seconds is not None:
+            metrics.redis_last_ping_seconds.set(ping_seconds)
+
+    @property
+    def up_cached(self) -> bool:
+        """Last observed up/down state without doing a fresh ping.
+
+        Used by /diagnostics so that the watcher's 1Hz poll doesn't
+        block on Redis socket timeouts during an outage. The state is
+        refreshed on every publish attempt and every ``is_connected()``
+        call, so under any non-trivial load it lags reality by at most
+        one event interval.
+        """
+        return bool(self._was_up)
+
+    @property
+    def last_ping_seconds(self) -> Optional[float]:
+        return self._last_ping_seconds
+
+    @property
+    def last_outage_at(self) -> Optional[datetime]:
+        return self._last_outage_at
 
     @property
     def pending_backup_count(self) -> int:

@@ -2,6 +2,8 @@
 
 import logging
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -11,6 +13,9 @@ async def disable_endpoint(
     """
     Create an Istio VirtualService that returns 503 for a specific endpoint.
     """
+    if not settings.DEFENSE_APPLY_ENABLED:
+        logger.debug(f"Lv.3 Endpoint disable (apply skipped) for {method} {path}")
+        return
     vs = {
         "apiVersion": "networking.istio.io/v1beta1",
         "kind": "VirtualService",
