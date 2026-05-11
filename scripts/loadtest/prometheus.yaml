@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: runtime-defense
+    static_configs:
+      - targets: ["runtime-defense:8080"]
+    metrics_path: /metrics
