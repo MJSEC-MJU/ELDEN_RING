@@ -46,3 +46,15 @@ redis_backup_dropped_total = Counter(
     "runtime_defense_redis_backup_dropped_total",
     "Contexts dropped because the in-memory backup queue was full.",
 )
+
+
+redis_up = Gauge(
+    "runtime_defense_redis_up",
+    "1 if last Redis ping succeeded, 0 otherwise.",
+)
+
+
+redis_last_ping_seconds = Gauge(
+    "runtime_defense_redis_last_ping_seconds",
+    "Latency of the last Redis ping in seconds (NaN until first probe).",
+)

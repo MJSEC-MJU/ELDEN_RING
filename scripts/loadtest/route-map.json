@@ -1,0 +1,23 @@
+{
+  "POST /api/login": {
+    "service": "target-app",
+    "file": "services/target-app/app.py",
+    "function": "login_handler",
+    "line_start": 26,
+    "line_end": 44
+  },
+  "GET /api/search": {
+    "service": "target-app",
+    "file": "services/target-app/app.py",
+    "function": "search_handler",
+    "line_start": 52,
+    "line_end": 61
+  },
+  "GET /api/file": {
+    "service": "target-app",
+    "file": "services/target-app/app.py",
+    "function": "file_handler",
+    "line_start": 69,
+    "line_end": 75
+  }
+}

@@ -2,6 +2,8 @@
 
 import logging
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -9,6 +11,9 @@ async def block_ip(source_ip: str, namespace: str = "elden-production"):
     """
     Create an Istio AuthorizationPolicy to DENY all requests from a specific IP.
     """
+    if not settings.DEFENSE_APPLY_ENABLED:
+        logger.debug(f"Lv.2 IP block (apply skipped) for {source_ip}")
+        return
     policy = {
         "apiVersion": "security.istio.io/v1beta1",
         "kind": "AuthorizationPolicy",

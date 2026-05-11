@@ -2,6 +2,8 @@
 
 import logging
 
+from src.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -10,6 +12,9 @@ async def apply_rate_limit(source_ip: str, requests_per_minute: int = 10):
     Create an Istio EnvoyFilter to rate-limit a specific IP.
     In non-K8s environments, this logs the action without applying.
     """
+    if not settings.DEFENSE_APPLY_ENABLED:
+        logger.debug(f"Lv.1 Rate limit (apply skipped) for {source_ip}")
+        return
     envoy_filter = {
         "apiVersion": "networking.istio.io/v1alpha3",
         "kind": "EnvoyFilter",

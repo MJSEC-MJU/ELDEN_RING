@@ -30,6 +30,12 @@ rules:
   - apiGroups: ["security.istio.io"]
     resources: ["authorizationpolicies", "peerauthentications"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # /diagnostics surfaces current/desired HPA replica counts so the
+  # reliability watcher can correlate load with autoscaling behavior.
+  # Read-only on the controller's own HPA in this namespace.
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

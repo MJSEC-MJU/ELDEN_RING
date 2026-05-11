@@ -31,6 +31,7 @@ from src.models import ManualEventRequest, NormalizedEvent, TargetEndpoint
 from src.normalizer import EventNormalizer
 from src.redis_publisher import RedisPublisher
 from src.source_mapper import SourceMapper
+from src.throughput import ThroughputTracker
 
 # ── Logging ──────────────────────────────────────────
 configure_logging()
@@ -84,6 +85,8 @@ normalizer = EventNormalizer()
 source_mapper = SourceMapper(settings.ROUTE_MAP_PATH)
 redis_pub = RedisPublisher(host=settings.REDIS_HOST, port=settings.REDIS_PORT)
 defense_mgr = DefenseManager()
+throughput = ThroughputTracker()
+_started_at = time.monotonic()
 
 # ── In-memory stores ────────────────────────────────
 contexts_store: list[dict] = []
@@ -100,6 +103,7 @@ async def run_pipeline(event: NormalizedEvent) -> dict:
 
     try:
         events_store.append(event)
+        throughput.record()
         metrics.events_total.labels(
             source=event.source,
             attack_category=event.attack_category,
@@ -261,17 +265,71 @@ async def ready():
     }
 
 
+def _read_hpa_replicas() -> dict:
+    """Best-effort HPA replica lookup. Returns {current,desired} or {error}.
+
+    Skipped (returns ``{"available": False}``) when in-cluster config is
+    not loadable — e.g. local docker-compose runs. Failures here must
+    never bubble up into a 5xx for /diagnostics, since the watcher polls
+    it once per second across the entire load test.
+    """
+    try:
+        from kubernetes import client, config  # local import: heavy + optional path
+        try:
+            config.load_incluster_config()
+        except config.ConfigException:
+            return {"available": False, "reason": "not-in-cluster"}
+        api = client.AutoscalingV2Api()
+        hpa = api.read_namespaced_horizontal_pod_autoscaler(
+            name="runtime-defense-controller",
+            namespace=settings.K8S_NAMESPACE,
+        )
+        return {
+            "available": True,
+            "current_replicas": hpa.status.current_replicas or 0,
+            "desired_replicas": hpa.status.desired_replicas or 0,
+            "min_replicas": hpa.spec.min_replicas,
+            "max_replicas": hpa.spec.max_replicas,
+        }
+    except Exception as e:  # noqa: BLE001 — diagnostics must not 5xx
+        return {"available": False, "reason": f"{type(e).__name__}: {e}"}
+
+
 @app.get("/diagnostics")
 async def diagnostics():
-    """Detailed subsystem state for operators. Not used by K8s probes."""
+    """Detailed subsystem state for operators. Not used by K8s probes.
+
+    Reads cached Redis state instead of doing a fresh ping so that
+    high-frequency observability pollers (e.g. the reliability watcher
+    at 1Hz) don't block on the 2s Redis socket timeout during an
+    outage — which would create exactly the blind window the watcher
+    is meant to capture. ``/readyz`` still does an active probe.
+    """
+    connected = redis_pub.up_cached
+    last_ping_s = redis_pub.last_ping_seconds
+    last_outage = redis_pub.last_outage_at
     return {
+        # Preserved for back-compat with existing consumers (e.g. /readyz).
         "redis": {
             "host": redis_pub.host,
             "port": redis_pub.port,
-            "connected": redis_pub.is_connected(),
+            "connected": connected,
+            "up": connected,
+            "last_ping_ms": int(last_ping_s * 1000) if last_ping_s is not None else None,
+            "last_outage_at": last_outage.isoformat() if last_outage else None,
             "backup_pending": redis_pub.pending_backup_count,
             "backup_dropped_total": redis_pub.dropped_count,
         },
+        "backup_queue": {
+            "length": redis_pub.pending_backup_count,
+            "capacity": settings.MEMORY_BACKUP_MAX_SIZE,
+            "drops_total": redis_pub.dropped_count,
+        },
+        "throughput": {
+            "events_per_sec_1m": round(throughput.events_per_sec(), 3),
+            "events_processed_total": throughput.total,
+        },
+        "hpa": _read_hpa_replicas(),
         "pipeline": {
             "adapters_loaded": len(normalizer.adapters),
             "routes_loaded": len(source_mapper.route_map),
@@ -279,5 +337,6 @@ async def diagnostics():
             "contexts_built": len(contexts_store),
             "failed_parses": len(failed_logs),
         },
+        "uptime_sec": int(time.monotonic() - _started_at),
         "auth_enforced": bool(settings.WEBHOOK_AUTH_TOKEN),
     }

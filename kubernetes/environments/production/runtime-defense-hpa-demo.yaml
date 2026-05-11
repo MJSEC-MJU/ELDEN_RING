@@ -1,0 +1,65 @@
+# ============================================================
+# ELDEN RING - Runtime Defense Controller HPA (DEMO ONLY)
+#
+# 11-주차 중간 발표용 데모 정책.
+# 운영용 매니페스트(runtime-defense-hpa.yaml)는 그대로 두고,
+# 데모/부하시연 시 이 파일만 apply 한다.
+#
+#   kubectl apply -f runtime-defense-hpa-demo.yaml
+#   # ... 데모 종료 후 ...
+#   kubectl apply -f runtime-defense-hpa.yaml   # 운영 정책으로 복귀
+#
+# 운영 정책과의 차이:
+#   - scaleDown.stabilizationWindowSeconds: 300 → 60
+#   - scaleDown.policies: -1 pod / 300s → -1 pod / 60s
+#   이 둘로 인해 부하 종료 후 4 → 2 복귀가 최대 ~3분에 끝남.
+#   운영 환경에서는 메모리 백업 큐 유실 방지를 위해 천천히 줄여야 한다.
+# ============================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: runtime-defense-controller
+  namespace: elden-production
+  labels:
+    app: runtime-defense-controller
+    elden-ring/plane: runtime-defense
+    elden-ring/profile: demo
+  annotations:
+    elden-ring/notice: |
+      Demo-only autoscaling profile. Loosened scaleDown windows enable
+      "back to baseline within 5 min" acceptance for the reliability
+      demo. Do NOT promote this file to production.
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: runtime-defense-controller
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      # DEMO: 60s stabilization + -1 pod / 60s lets 4→2 finish within ~3 min.
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

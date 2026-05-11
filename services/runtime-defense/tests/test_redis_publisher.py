@@ -18,6 +18,9 @@ def _new_pub() -> RedisPublisher:
     pub.queue_key = "elden:phase2:context:queue"
     pub._memory_backup = collections.deque(maxlen=MAX_BACKUP_SIZE)
     pub._dropped_count = 0
+    pub._last_ping_seconds = None
+    pub._last_outage_at = None
+    pub._was_up = None
     pub.client = fakeredis.FakeRedis(decode_responses=True)
     return pub
 
