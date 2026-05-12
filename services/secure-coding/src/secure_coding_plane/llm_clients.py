@@ -21,6 +21,7 @@ class LlmStructuredResponse:
     raw_text: str
     provider: str
     model: str | None
+    usage: dict[str, int] | None = None  # input/output tokens, cache hits 등
 
 
 def create_patch_client(settings: PlaneSettings) -> "BasePatchCliClient":
@@ -36,6 +37,18 @@ def create_patch_client(settings: PlaneSettings) -> "BasePatchCliClient":
             command=settings.secure_coding_claude_command,
             model=settings.secure_coding_claude_model,
             timeout_sec=settings.secure_coding_llm_timeout_sec,
+        )
+    if provider in {"anthropic", "anthropic_sdk"}:
+        if not settings.secure_coding_anthropic_api_key:
+            raise LlmPatchClientError(
+                "anthropic provider requires SECURE_CODING_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY)"
+            )
+        return AnthropicSdkPatchClient(
+            api_key=settings.secure_coding_anthropic_api_key,
+            model=settings.secure_coding_anthropic_model,
+            timeout_sec=settings.secure_coding_llm_timeout_sec,
+            max_tokens=settings.secure_coding_llm_max_tokens,
+            prompt_cache_enabled=settings.secure_coding_prompt_cache_enabled,
         )
     raise LlmPatchClientError(f"Unsupported LLM provider: {settings.secure_coding_llm_provider}")
 
@@ -55,6 +68,7 @@ class BasePatchCliClient:
         prompt: str,
         workdir: Path,
         schema: dict[str, Any],
+        temperature: float | None = None,
     ) -> LlmStructuredResponse:
         raise NotImplementedError
 
@@ -139,6 +153,7 @@ class CodexPatchCliClient(BasePatchCliClient):
         prompt: str,
         workdir: Path,
         schema: dict[str, Any],
+        temperature: float | None = None,
     ) -> LlmStructuredResponse:
         self._ensure_ready()
         with tempfile.TemporaryDirectory(prefix="codex-patch-") as tmp_dir:
@@ -190,11 +205,9 @@ class ClaudeCodePatchCliClient(BasePatchCliClient):
         prompt: str,
         workdir: Path,
         schema: dict[str, Any],
+        temperature: float | None = None,
     ) -> LlmStructuredResponse:
         self._ensure_ready()
-        # Send the vulnerable code via stdin (safe for embedded quotes / SQL strings)
-        # and enforce the response shape with --json-schema (Claude Code 2.0.45+).
-        # Claude wraps the schema-validated object under `structured_output`.
         args = [
             self.command,
             "-p",
@@ -229,3 +242,105 @@ class ClaudeCodePatchCliClient(BasePatchCliClient):
             if isinstance(result, str) and result.strip():
                 return self._parse_json_payload(result)
         return self._parse_json_payload(raw_text)
+
+
+class AnthropicSdkPatchClient(BasePatchCliClient):
+    """Direct Anthropic SDK 호출. temperature + prompt cache_control 가 실제 작동."""
+
+    provider_name = "anthropic"
+
+    def __init__(self, *, api_key: str, model: str, timeout_sec: int, max_tokens: int, prompt_cache_enabled: bool) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.timeout_sec = timeout_sec
+        self.max_tokens = max_tokens
+        self.prompt_cache_enabled = prompt_cache_enabled
+        self._client = None
+
+    def _client_lazy(self):
+        if self._client is None:
+            try:
+                import anthropic
+            except ImportError as e:
+                raise LlmPatchClientError(
+                    "anthropic Python SDK 미설치. requirements.txt 의 anthropic>=0.40 확인."
+                ) from e
+            self._client = anthropic.Anthropic(api_key=self.api_key, timeout=self.timeout_sec)
+        return self._client
+
+    def _ensure_ready(self) -> None:
+        if not self.api_key:
+            raise LlmPatchClientError("anthropic API key not set")
+
+    def generate_patch_json(
+        self,
+        *,
+        prompt: str,
+        workdir: Path,
+        schema: dict[str, Any],
+        temperature: float | None = None,
+    ) -> LlmStructuredResponse:
+        self._ensure_ready()
+        client = self._client_lazy()
+
+        system_blocks = [
+            {
+                "type": "text",
+                "text": (
+                    "You are a secure code patch generator. You MUST output strict JSON matching "
+                    "the provided schema with no markdown fences and no explanatory prose. "
+                    "The 'patched_snippet' field must be a complete drop-in replacement for the "
+                    "vulnerable code region; the 'change_summary' field must explain the security fix "
+                    "in one sentence. Keep changes minimal and never add third-party dependencies."
+                ),
+            },
+            {
+                "type": "text",
+                "text": "Response schema (must validate):\n" + json.dumps(schema, ensure_ascii=False),
+            },
+        ]
+        if self.prompt_cache_enabled:
+            for block in system_blocks:
+                block["cache_control"] = {"type": "ephemeral"}
+
+        user_messages = [
+            {"role": "user", "content": prompt},
+        ]
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": system_blocks,
+            "messages": user_messages,
+        }
+        if temperature is not None:
+            kwargs["temperature"] = max(0.0, min(temperature, 1.0))
+
+        try:
+            response = client.messages.create(**kwargs)
+        except Exception as e:
+            raise LlmPatchClientError(f"anthropic.messages.create failed: {e}") from e
+
+        text_chunks = []
+        for block in response.content:
+            block_type = getattr(block, "type", None)
+            if block_type == "text":
+                text_chunks.append(getattr(block, "text", ""))
+        raw_text = "".join(text_chunks).strip()
+
+        usage_obj = getattr(response, "usage", None)
+        usage: dict[str, int] = {}
+        if usage_obj is not None:
+            for key in ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+                val = getattr(usage_obj, key, None)
+                if val is not None:
+                    usage[key] = int(val)
+
+        payload = self._parse_json_payload(raw_text)
+        return LlmStructuredResponse(
+            payload=payload,
+            raw_text=raw_text,
+            provider=self.provider_name,
+            model=self.model,
+            usage=usage or None,
+        )

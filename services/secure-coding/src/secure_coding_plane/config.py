@@ -19,12 +19,24 @@ class PlaneSettings:
     secure_coding_codex_model: str | None = None
     secure_coding_claude_command: str = "claude"
     secure_coding_claude_model: str | None = None
+    secure_coding_anthropic_api_key: str | None = None
+    secure_coding_anthropic_model: str = "claude-sonnet-4-6"
     secure_coding_llm_timeout_sec: int = 180
+    secure_coding_llm_temperature: float = 0.2
+    secure_coding_llm_max_tokens: int = 2048
+    secure_coding_prompt_cache_enabled: bool = True
+    secure_coding_max_patch_retry: int = 3
+    secure_coding_retry_temp_step: float = 0.3
+    secure_coding_retry_temp_cap: float = 1.0
     secure_coding_apply_mode: str = "workspace"
     secure_coding_apply_rollback_on_failure: bool = True
     secure_coding_build_mode: str = "simulate"
     secure_coding_build_command: str | None = None
     secure_coding_build_image_tag: str | None = None
+
+
+def _bool(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).lower() in {"1", "true", "yes", "on"}
 
 
 def load_settings() -> PlaneSettings:
@@ -48,9 +60,17 @@ def load_settings() -> PlaneSettings:
         secure_coding_codex_model=os.getenv("SECURE_CODING_CODEX_MODEL"),
         secure_coding_claude_command=os.getenv("SECURE_CODING_CLAUDE_COMMAND", "claude"),
         secure_coding_claude_model=os.getenv("SECURE_CODING_CLAUDE_MODEL"),
+        secure_coding_anthropic_api_key=os.getenv("SECURE_CODING_ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
+        secure_coding_anthropic_model=os.getenv("SECURE_CODING_ANTHROPIC_MODEL", "claude-sonnet-4-6"),
         secure_coding_llm_timeout_sec=int(os.getenv("SECURE_CODING_LLM_TIMEOUT_SEC", "180")),
+        secure_coding_llm_temperature=float(os.getenv("SECURE_CODING_LLM_TEMPERATURE", "0.2")),
+        secure_coding_llm_max_tokens=int(os.getenv("SECURE_CODING_LLM_MAX_TOKENS", "2048")),
+        secure_coding_prompt_cache_enabled=_bool("SECURE_CODING_PROMPT_CACHE_ENABLED", True),
+        secure_coding_max_patch_retry=int(os.getenv("SECURE_CODING_MAX_PATCH_RETRY", "3")),
+        secure_coding_retry_temp_step=float(os.getenv("SECURE_CODING_RETRY_TEMP_STEP", "0.3")),
+        secure_coding_retry_temp_cap=float(os.getenv("SECURE_CODING_RETRY_TEMP_CAP", "1.0")),
         secure_coding_apply_mode=os.getenv("SECURE_CODING_APPLY_MODE", "workspace"),
-        secure_coding_apply_rollback_on_failure=os.getenv("SECURE_CODING_APPLY_ROLLBACK_ON_FAILURE", "true").lower() in {"1", "true", "yes", "on"},
+        secure_coding_apply_rollback_on_failure=_bool("SECURE_CODING_APPLY_ROLLBACK_ON_FAILURE", True),
         secure_coding_build_mode=os.getenv("SECURE_CODING_BUILD_MODE", "simulate"),
         secure_coding_build_command=os.getenv("SECURE_CODING_BUILD_COMMAND"),
         secure_coding_build_image_tag=os.getenv("SECURE_CODING_BUILD_IMAGE_TAG"),

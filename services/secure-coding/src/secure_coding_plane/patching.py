@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import difflib
+import logging
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
 from .config import PlaneSettings
-from .llm_clients import LlmPatchClientError, create_patch_client
+from .llm_clients import LlmPatchClientError, LlmStructuredResponse, create_patch_client
 from .schemas import PatchPayload, PatchResponse, PatchStrategy, RecheckResponse, RecheckResult
 from .storage import PlaneStore
 from .utils import generate_id, write_text
+
+logger = logging.getLogger(__name__)
 
 
 class SecureCodingPatchEngine:
@@ -64,6 +67,9 @@ class SecureCodingPatchEngine:
             "security_fix": llm_patch["change_summary"].get("security_fix", strategy.fix_actions[0]),
             "llm_provider": llm_patch.get("provider", self.settings.secure_coding_llm_provider),
             "llm_model": llm_patch.get("model"),
+            "llm_attempts": llm_patch.get("attempts", 1),
+            "llm_final_temperature": llm_patch.get("final_temperature"),
+            "llm_usage": llm_patch.get("usage"),
         }
         patch = PatchPayload(
             patch_id=patch_id,
@@ -152,17 +158,17 @@ class SecureCodingPatchEngine:
                 "change_summary": {"security_fix": strategy.fix_actions[0]},
                 "provider": "mock",
                 "model": None,
+                "attempts": 1,
+                "final_temperature": None,
+                "usage": None,
             }
         if self.patch_client is None:
             raise LlmPatchClientError("LLM patch client was not initialized")
         prompt = self._build_llm_patch_prompt(context, code_context, strategy)
         prompt_path = self.artifact_root / "llm" / "prompts" / f"{job_id}.txt"
         write_text(prompt_path, prompt)
-        response = self.patch_client.generate_patch_json(
-            prompt=prompt,
-            workdir=self.settings.workspace_root,
-            schema=self._llm_patch_schema(),
-        )
+
+        response, attempt, final_temp = self._call_llm_with_retry(job_id, prompt)
         response_path = self.artifact_root / "llm" / "responses" / f"{job_id}.json"
         write_text(response_path, response.raw_text)
         patched_snippet = response.payload.get("patched_snippet")
@@ -176,7 +182,52 @@ class SecureCodingPatchEngine:
             "change_summary": change_summary,
             "provider": response.provider,
             "model": response.model,
+            "attempts": attempt,
+            "final_temperature": final_temp,
+            "usage": response.usage,
         }
+
+    def _call_llm_with_retry(self, job_id: str, prompt: str) -> tuple[LlmStructuredResponse, int, float]:
+        """LLM 호출. 실패하면 MAX_PATCH_RETRY 까지 재시도하면서 temperature 를 단계적으로 올림.
+
+        실패 = LlmPatchClientError 또는 patched_snippet 누락. 마지막 attempt 실패 시 raise.
+        """
+        max_attempts = max(1, self.settings.secure_coding_max_patch_retry)
+        base_temp = self.settings.secure_coding_llm_temperature
+        step = self.settings.secure_coding_retry_temp_step
+        cap = self.settings.secure_coding_retry_temp_cap
+
+        last_error: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            temperature = min(base_temp + step * (attempt - 1), cap)
+            try:
+                response = self.patch_client.generate_patch_json(
+                    prompt=prompt,
+                    workdir=self.settings.workspace_root,
+                    schema=self._llm_patch_schema(),
+                    temperature=temperature,
+                )
+                snippet = response.payload.get("patched_snippet")
+                if not isinstance(snippet, str) or not snippet.strip():
+                    raise LlmPatchClientError(
+                        f"LLM output missing patched_snippet on attempt {attempt}"
+                    )
+                if attempt > 1:
+                    logger.info(
+                        "secure-coding: LLM retry success job=%s attempt=%d/%d temp=%.2f",
+                        job_id, attempt, max_attempts, temperature,
+                    )
+                return response, attempt, temperature
+            except LlmPatchClientError as e:
+                last_error = e
+                logger.warning(
+                    "secure-coding: LLM attempt failed job=%s attempt=%d/%d temp=%.2f: %s",
+                    job_id, attempt, max_attempts, temperature, e,
+                )
+                continue
+        raise LlmPatchClientError(
+            f"LLM patch generation failed after {max_attempts} attempts: {last_error}"
+        )
 
     def _llm_patch_schema(self) -> dict[str, Any]:
         return {
