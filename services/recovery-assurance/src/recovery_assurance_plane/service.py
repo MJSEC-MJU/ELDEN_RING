@@ -82,13 +82,13 @@ class RecoveryAssuranceService:
             runtime_context = self.store.get_runtime_context(request["context_id"])
             self.stages.deploy(validation_job_id, request["candidate_image"])
 
-            startup = self.stages.startup_check(validation_job_id, request["candidate_image"])
+            startup = self.stages.startup_check(validation_job_id, request)
             stage_results["startup"] = startup
             if startup.status != "pass":
                 self._fail(validation_job_id, request, "startup", startup, stage_results)
                 return
 
-            regression = self.stages.regression_test(validation_job_id, request["candidate_image"])
+            regression = self.stages.regression_test(validation_job_id, request)
             stage_results["regression"] = regression
             if regression.status != "pass":
                 self._fail(validation_job_id, request, "regression", regression, stage_results)

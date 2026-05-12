@@ -21,7 +21,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 $env:PLANE_WORKSPACE_ROOT = "$PWD\\runtime\\workspace"
-$env:SECURE_CODING_LLM_PROVIDER = "mock"
+$env:SECURE_CODING_LLM_PROVIDER = "codex"   # or "claude"
 python -m uvicorn src.main:app --host 0.0.0.0 --port 8080
 ```
 
@@ -46,7 +46,7 @@ python -m unittest discover tests -v
 - `PLANE_ARTIFACT_ROOT`: diff, snapshot, build log 저장 위치
 - `PLANE_DB_PATH`: SQLite DB 경로
 - `PLANE_REDIS_URL`: Redis 연결 문자열
-- `SECURE_CODING_LLM_PROVIDER`: `mock`, `codex`, `claude`
+- `SECURE_CODING_LLM_PROVIDER`: `codex`, `claude`
 - `SECURE_CODING_BUILD_MODE`: `simulate`, `command`
 - `SECURE_CODING_BUILD_COMMAND`: 실제 이미지 빌드 명령
 - `SECURE_CODING_BUILD_IMAGE_TAG`: 결과 candidate image tag override

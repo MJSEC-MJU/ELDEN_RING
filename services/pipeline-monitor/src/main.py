@@ -24,6 +24,7 @@ from .llm_oauth import (
     get_login_session,
     llm_status,
     run_patch_smoke,
+    run_validation_smoke,
     start_login,
     submit_login_code,
 )
@@ -198,6 +199,16 @@ async def simulate_llm_secure_coding(provider: str = "codex") -> JSONResponse:
         finished = time.time()
         duration_ms = int((finished - started) * 1000)
         context, phase2, phase4 = _build_llm_simulation_payload(smoke, duration_ms=duration_ms)
+        phase3_validation = await asyncio.to_thread(run_validation_smoke, provider, context, phase2)
+        phase4.update(
+            {
+                "exploit": phase3_validation["exploit"],
+                "regression": phase3_validation["regression"],
+                "slo": phase3_validation["slo"],
+                "risk": phase3_validation["risk"],
+                "phase3_llm": phase3_validation,
+            }
+        )
         await _set_llm_telemetry(
             status="success",
             provider=smoke["provider"],

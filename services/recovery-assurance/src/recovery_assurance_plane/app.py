@@ -67,14 +67,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @router.post("/internal/startup-check")
     def internal_startup_check(payload: dict[str, Any]) -> dict[str, Any]:
         validation_job_id = payload.get("validation_job_id", "internal-ra-job")
-        candidate_image = payload.get("candidate_image", "")
-        return service.stages.startup_check(validation_job_id, candidate_image).model_dump(mode="json")
+        return service.stages.startup_check(validation_job_id, payload).model_dump(mode="json")
 
     @router.post("/internal/regression-test")
     def internal_regression_test(payload: dict[str, Any]) -> dict[str, Any]:
         validation_job_id = payload.get("validation_job_id", "internal-ra-job")
-        candidate_image = payload.get("candidate_image", "")
-        return service.stages.regression_test(validation_job_id, candidate_image).model_dump(mode="json")
+        return service.stages.regression_test(validation_job_id, payload).model_dump(mode="json")
 
     @router.post("/internal/security-replay")
     def internal_security_replay(payload: dict[str, Any]) -> dict[str, Any]:

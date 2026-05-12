@@ -5,7 +5,28 @@ import unittest
 from pathlib import Path
 
 from src.secure_coding_plane.config import PlaneSettings
+from src.secure_coding_plane.llm_clients import LlmStructuredResponse
 from src.secure_coding_plane.worker import SecureCodingWorker
+
+
+class FakePatchClient:
+    def generate_patch_json(self, *, prompt, workdir, schema):
+        return LlmStructuredResponse(
+            payload={
+                "patched_snippet": "\n".join(
+                    [
+                        "def login_handler(username, password):",
+                        "    query = \"SELECT * FROM users WHERE username = ? AND password = ?\"",
+                        "    result = db.execute(query, (username, password))",
+                        "    return result",
+                    ]
+                ),
+                "change_summary": {"security_fix": "parameterized query binding"},
+            },
+            raw_text='{"patched_snippet":"...","change_summary":{"security_fix":"parameterized query binding"}}',
+            provider="test_llm",
+            model=None,
+        )
 
 
 class SecureCodingWorkerTests(unittest.TestCase):
@@ -32,9 +53,10 @@ class SecureCodingWorkerTests(unittest.TestCase):
             artifact_root=root / "artifacts",
             db_path=root / "secure_coding.db",
             redis_url=None,
-            secure_coding_llm_provider="mock",
+            secure_coding_llm_provider="codex",
         )
         self.worker = SecureCodingWorker(self.settings)
+        self.worker.service.patch_engine.patch_client = FakePatchClient()
 
     def tearDown(self) -> None:
         self.worker.close()

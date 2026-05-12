@@ -423,6 +423,30 @@ def run_patch_smoke(provider: str) -> dict[str, Any]:
         raise
 
 
+def run_validation_smoke(provider: str, context: dict[str, Any], phase2: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_provider(provider)
+    try:
+        status = _provider_status(normalized)
+        if not status["available"]:
+            raise LlmOAuthError(status["detail"])
+        if not status["authenticated"]:
+            raise LlmOAuthError(f"{normalized} OAuth session is not authenticated")
+        prompt = _validation_prompt(context, phase2)
+        schema = _validation_schema()
+        if normalized == "codex":
+            payload = _run_codex_validation_smoke(prompt, schema)
+        elif normalized == "claude":
+            payload = _run_claude_validation_smoke(prompt, schema)
+        else:
+            raise LlmOAuthError(f"Unsupported LLM provider: {provider}")
+        result = _validation_result_payload(normalized, payload)
+        _record_provider_health(normalized, True)
+        return result
+    except LlmOAuthError as exc:
+        _record_provider_health(normalized, False, str(exc))
+        raise
+
+
 def _normalize_provider(provider: str) -> str:
     value = (provider or "codex").lower().strip()
     if value in {"codex", "openai"}:
@@ -702,6 +726,63 @@ def _run_claude_patch_smoke() -> dict[str, Any]:
     return _patch_result_payload("claude", payload, completed.stdout)
 
 
+def _run_codex_validation_smoke(prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
+    command = _codex_command()
+    if not command:
+        raise LlmOAuthError("Codex CLI not found")
+    with tempfile.TemporaryDirectory(prefix="elden-monitor-codex-validation-") as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        schema_path = tmp_root / "schema.json"
+        output_path = tmp_root / "output.json"
+        schema_path.write_text(json.dumps(schema), encoding="utf-8")
+        completed = _run(
+            command
+            + [
+                "exec",
+                "--skip-git-repo-check",
+                "-C",
+                str(tmp_root),
+                "--sandbox",
+                "read-only",
+                "--output-schema",
+                str(schema_path),
+                "-o",
+                str(output_path),
+                "-",
+            ],
+            input_text=prompt,
+            timeout=int(os.getenv("MONITOR_LLM_TIMEOUT_SEC", "180")),
+        )
+        if completed.returncode != 0:
+            raise LlmOAuthError(_sanitize_text(completed.stderr or completed.stdout or "Codex validation smoke failed"))
+        raw_text = output_path.read_text(encoding="utf-8") if output_path.exists() else completed.stdout
+        return _parse_json_payload(raw_text)
+
+
+def _run_claude_validation_smoke(prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
+    command = _claude_command()
+    if not command:
+        raise LlmOAuthError("Claude CLI not found")
+    completed = _run(
+        command
+        + [
+            "-p",
+            "--permission-mode", "dontAsk",
+            "--tools", "",
+            "--output-format", "json",
+            "--json-schema", json.dumps(schema),
+        ],
+        input_text=prompt,
+        timeout=int(os.getenv("MONITOR_LLM_TIMEOUT_SEC", "180")),
+    )
+    if completed.returncode != 0:
+        raise LlmOAuthError(_format_claude_error(completed.stderr or completed.stdout or "Claude validation smoke failed"))
+    wrapper_error = _format_claude_result_error(completed.stdout)
+    if wrapper_error:
+        raise LlmOAuthError(wrapper_error)
+    return _extract_claude_structured_output(completed.stdout)
+
+
 def _format_claude_error(raw: str) -> str:
     return _format_claude_result_error(raw) or _sanitize_text(raw) or "Claude patch smoke failed"
 
@@ -786,6 +867,76 @@ def _patch_prompt() -> str:
             "    return result",
         ]
     )
+
+
+def _validation_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "exploit": {"type": "string", "enum": ["PASSED", "FAILED"]},
+            "regression": {"type": "string", "enum": ["PASSED", "FAILED"]},
+            "slo": {"type": "string", "enum": ["PASSED", "FAILED"]},
+            "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+            "validation_summary": {
+                "type": "object",
+                "properties": {
+                    "security_replay": {"type": "string"},
+                    "regression": {"type": "string"},
+                    "slo": {"type": "string"},
+                },
+                "required": ["security_replay", "regression", "slo"],
+                "additionalProperties": False,
+            },
+        },
+        "required": ["exploit", "regression", "slo", "risk", "validation_summary"],
+        "additionalProperties": False,
+    }
+
+
+def _validation_prompt(context: dict[str, Any], phase2: dict[str, Any]) -> str:
+    evidence = {
+        "runtime_context": context,
+        "phase2_candidate": phase2,
+        "patch_diff": (phase2.get("change_summary") or {}).get("unified_diff"),
+        "patched_snippet": (phase2.get("change_summary") or {}).get("patched_snippet"),
+    }
+    return "\n".join(
+        [
+            "You are the ELDEN RING Phase 3 Recovery Assurance validator.",
+            "Evaluate the Phase 2 candidate with an offline LLM validation smoke.",
+            "Return only JSON matching this shape:",
+            '{"exploit":"PASSED|FAILED","regression":"PASSED|FAILED","slo":"PASSED|FAILED","risk":"low|medium|high","validation_summary":{"security_replay":"...","regression":"...","slo":"..."}}',
+            "Rules:",
+            "- exploit is PASSED only when the patch plausibly neutralizes the original CWE payload.",
+            "- regression is PASSED when the patch is minimal and preserves function signature/return behavior.",
+            "- slo is PASSED when the patch is simple enough to avoid material latency, error-rate, or throughput regression.",
+            "- risk should be low for a minimal single-function parameterized query fix, medium/high for broader or uncertain changes.",
+            "- Be conservative if evidence is missing.",
+            "Evidence JSON:",
+            json.dumps(evidence, ensure_ascii=False, indent=2),
+        ]
+    )
+
+
+def _validation_result_payload(provider: str, payload: dict[str, Any]) -> dict[str, Any]:
+    for key in ("exploit", "regression", "slo"):
+        if payload.get(key) not in {"PASSED", "FAILED"}:
+            raise LlmOAuthError(f"Phase 3 LLM validation output did not contain valid {key}")
+    risk = payload.get("risk")
+    if risk not in {"low", "medium", "high"}:
+        raise LlmOAuthError("Phase 3 LLM validation output did not contain valid risk")
+    summary = payload.get("validation_summary")
+    if not isinstance(summary, dict):
+        raise LlmOAuthError("Phase 3 LLM validation output did not contain validation_summary")
+    return {
+        "provider": provider,
+        "llm_real": True,
+        "exploit": payload["exploit"],
+        "regression": payload["regression"],
+        "slo": payload["slo"],
+        "risk": risk,
+        "validation_summary": summary,
+    }
 
 
 def _run(args: list[str], *, timeout: int, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
