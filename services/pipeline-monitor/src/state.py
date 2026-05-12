@@ -101,6 +101,7 @@ class PipelineState:
                 "exploit": payload.get("exploit"),
                 "regression": payload.get("regression"),
                 "slo": payload.get("slo"),
+                "llm": payload.get("phase3_llm"),
             }
             rec.risk = payload.get("risk") or rec.risk
             rec.branch = payload.get("branch") or rec.branch

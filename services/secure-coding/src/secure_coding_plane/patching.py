@@ -18,7 +18,7 @@ class SecureCodingPatchEngine:
         self.settings = settings
         self.store = store
         self.artifact_root = artifact_root
-        self.patch_client = None if settings.secure_coding_llm_provider.lower() == "mock" else create_patch_client(settings)
+        self.patch_client = create_patch_client(settings)
 
     def run_patch(
         self,
@@ -102,7 +102,7 @@ class SecureCodingPatchEngine:
                 compile(patched_content, patch_row["patched_file_path"], "exec")
             except SyntaxError:
                 syntax_valid = False
-        safety_checks_passed = self._patched_content_is_safe(patch_row["unified_diff"])
+        safety_checks_passed = self._patched_content_is_safe(patch_row["unified_diff"], patched_content)
         recheck = RecheckResult(
             syntax_valid=syntax_valid,
             safety_checks_passed=safety_checks_passed,
@@ -146,13 +146,6 @@ class SecureCodingPatchEngine:
         code_context: dict[str, Any],
         strategy: PatchStrategy,
     ) -> dict[str, Any]:
-        if self.settings.secure_coding_llm_provider.lower() == "mock":
-            return {
-                "patched_snippet": self._patch_snippet(context["attack_info"]["cwe_id"], code_context["snippet"]),
-                "change_summary": {"security_fix": strategy.fix_actions[0]},
-                "provider": "mock",
-                "model": None,
-            }
         if self.patch_client is None:
             raise LlmPatchClientError("LLM patch client was not initialized")
         prompt = self._build_llm_patch_prompt(context, code_context, strategy)
@@ -221,88 +214,16 @@ class SecureCodingPatchEngine:
             ]
         )
 
-    def _patch_snippet(self, cwe_id: str, snippet: str) -> str:
-        if cwe_id == "CWE-89":
-            return self._patch_sqli(snippet)
-        if cwe_id == "CWE-79":
-            return self._patch_xss(snippet)
-        return self._patch_path_traversal(snippet)
-
-    def _patch_sqli(self, snippet: str) -> str:
-        lines = snippet.splitlines()
-        patched, query_replaced, execute_replaced = [], False, False
-        for line in lines:
-            stripped = line.strip()
-            indent = line[: len(line) - len(line.lstrip())]
-            if not query_replaced and ("SELECT" in line and ("{" in line or ".format(" in line or "+ " in line)):
-                patched.append(f'{indent}query = "SELECT * FROM users WHERE username = %s AND password = %s"')
-                query_replaced = True
-                continue
-            if not execute_replaced and "execute(" in stripped and stripped.count(",") == 0:
-                callee = stripped.split("execute(")[0] + "execute"
-                patched.append(f"{indent}{callee}(query, (username, password))")
-                execute_replaced = True
-                continue
-            patched.append(line)
-        if not query_replaced:
-            patched.append('    query = "SELECT * FROM users WHERE username = %s AND password = %s"')
-        if not execute_replaced:
-            patched.append("    result = db.execute(query, (username, password))")
-        return "\n".join(patched)
-
-    def _patch_xss(self, snippet: str) -> str:
-        lines = snippet.splitlines()
-        patched, inserted = [], False
-        for line in lines:
-            patched.append(line)
-            if not inserted and ("request." in line or "content" in line or "user_input" in line):
-                indent = line[: len(line) - len(line.lstrip())]
-                patched.append(f"{indent}from html import escape")
-                patched.append(f"{indent}safe_content = escape(content if 'content' in locals() else user_input, quote=True)")
-                inserted = True
-        if not inserted:
-            patched.append("    from html import escape")
-            patched.append("    safe_content = escape(user_input, quote=True)")
-        return "\n".join(patched)
-
-    def _patch_path_traversal(self, snippet: str) -> str:
-        lines = snippet.splitlines()
-        patched, inserted = [], False
-        for line in lines:
-            patched.append(line)
-            if not inserted and ("open(" in line or "os.path.join" in line or "Path(" in line):
-                indent = line[: len(line) - len(line.lstrip())]
-                patched.extend(
-                    [
-                        f"{indent}from pathlib import Path",
-                        f"{indent}base_dir = Path(BASE_DIR).resolve() if 'BASE_DIR' in globals() else Path('.').resolve()",
-                        f"{indent}requested_path = (base_dir / filename).resolve()",
-                        f"{indent}if base_dir not in requested_path.parents and requested_path != base_dir:",
-                        f"{indent}    raise ValueError('Invalid path')",
-                    ]
-                )
-                inserted = True
-        if not inserted:
-            patched.extend(
-                [
-                    "    from pathlib import Path",
-                    "    base_dir = Path(BASE_DIR).resolve() if 'BASE_DIR' in globals() else Path('.').resolve()",
-                    "    requested_path = (base_dir / filename).resolve()",
-                    "    if base_dir not in requested_path.parents and requested_path != base_dir:",
-                    "        raise ValueError('Invalid path')",
-                ]
-            )
-        return "\n".join(patched)
-
-    def _patched_content_is_safe(self, unified_diff: str) -> bool:
+    def _patched_content_is_safe(self, unified_diff: str, patched_content: str = "") -> bool:
+        evidence = f"{unified_diff}\n{patched_content}"
         sqli_markers = ["execute(query, (", "%s", "SELECT * FROM users WHERE username = ?", "params=", ".bindparams("]
         xss_markers = ["escape(", "html.escape", "markupsafe", "bleach.clean"]
         path_markers = ["resolve()", "abspath(", "realpath(", "normpath(", "relative_to("]
         return bool(
-            any(marker in unified_diff for marker in sqli_markers)
-            or any(marker in unified_diff for marker in xss_markers)
+            any(marker in evidence for marker in sqli_markers)
+            or any(marker in evidence for marker in xss_markers)
             or (
-                any(marker in unified_diff for marker in path_markers)
-                and ("Invalid path" in unified_diff or "base_dir" in unified_diff or "startswith(" in unified_diff)
+                any(marker in evidence for marker in path_markers)
+                and ("Invalid path" in evidence or "base_dir" in evidence or "startswith(" in evidence)
             )
         )

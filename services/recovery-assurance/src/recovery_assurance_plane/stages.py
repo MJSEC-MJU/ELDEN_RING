@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .llm_validation import create_validation_client
 from .models import ValidationStageResult
 from .store import JsonStore
 from .utils import dump_json, now_iso, write_json
@@ -15,6 +17,7 @@ class ValidationStages:
         self.store = store
         self.artifact_dir = settings.artifact_dir
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
+        self.validation_client = create_validation_client(settings)
 
     def deploy(self, validation_job_id: str, candidate_image: str) -> dict[str, str]:
         self._update_job(
@@ -43,7 +46,7 @@ class ValidationStages:
         write_json(self.artifact_dir / "cleanup" / f"{validation_job_id}.json", result)
         return result
 
-    def startup_check(self, validation_job_id: str, candidate_image: str) -> ValidationStageResult:
+    def startup_check(self, validation_job_id: str, request: dict[str, Any]) -> ValidationStageResult:
         self._update_job(
             validation_job_id,
             status="STARTUP_CHECKING",
@@ -51,20 +54,18 @@ class ValidationStages:
             progress=35,
             updated_at=now_iso(),
         )
-        failed = not candidate_image or "fail-startup" in candidate_image
-        result = ValidationStageResult(
-            status="fail" if failed else "pass",
-            summary="Candidate failed startup checks" if failed else "Startup, readiness, and dependency checks passed",
-            metrics={
-                "startup_probe_passed": not failed,
-                "readiness_probe_passed": not failed,
-                "liveness_probe_passed": not failed,
-                "timeout_seconds": self.settings.startup_timeout_seconds,
+        result = self._llm_stage_result(
+            validation_job_id,
+            "startup",
+            request,
+            extra={
+                "startup_timeout_seconds": self.settings.startup_timeout_seconds,
+                "expected_decision": "fail if candidate_image is empty or startup evidence indicates boot/readiness failure",
             },
         )
         return self._save_stage(validation_job_id, "startup", result)
 
-    def regression_test(self, validation_job_id: str, candidate_image: str) -> ValidationStageResult:
+    def regression_test(self, validation_job_id: str, request: dict[str, Any]) -> ValidationStageResult:
         self._update_job(
             validation_job_id,
             status="REGRESSION_TESTING",
@@ -72,11 +73,13 @@ class ValidationStages:
             progress=55,
             updated_at=now_iso(),
         )
-        failed = "fail-regression" in candidate_image
-        result = ValidationStageResult(
-            status="fail" if failed else "pass",
-            summary="Core regression suite failed" if failed else "Core regression suite passed",
-            metrics={"total": 12, "passed": 0 if failed else 12, "failed": 12 if failed else 0},
+        result = self._llm_stage_result(
+            validation_job_id,
+            "regression",
+            request,
+            extra={
+                "expected_decision": "fail if patch evidence suggests unrelated behavior changes or regression evidence is negative",
+            },
         )
         return self._save_stage(validation_job_id, "regression", result)
 
@@ -93,26 +96,16 @@ class ValidationStages:
             progress=75,
             updated_at=now_iso(),
         )
-        cwe_id = request["cwe_id"]
-        diff = self._read_patch_file(request.get("patch_file"))
-        blocked = self._security_fix_matches_cwe(cwe_id, diff)
-        if "fail-security" in request["candidate_image"]:
-            blocked = False
-        payload_sample = None
-        endpoint = None
-        if runtime_context:
-            payload_sample = runtime_context.get("attack_info", {}).get("payload_sample")
-            endpoint = runtime_context.get("target", {}).get("endpoint")
-        result = ValidationStageResult(
-            status="pass" if blocked else "fail",
-            summary="Original attack payload blocked" if blocked else "Original attack payload still succeeds",
-            metrics={
-                "cwe_id": cwe_id,
-                "payload_sample": payload_sample,
-                "endpoint": endpoint,
-                "blocked": blocked,
-                "sensitive_data_exposed": not blocked,
-                "internal_error_exposed": False,
+        result = self._llm_stage_result(
+            validation_job_id,
+            "security_replay",
+            request,
+            runtime_context=runtime_context,
+            extra={
+                "expected_decision": (
+                    "pass only if the patch diff plausibly neutralizes the original CWE and payload; "
+                    "fail if vulnerable string interpolation, unescaped rendering, or path traversal remains"
+                ),
             },
         )
         return self._save_stage(validation_job_id, "security_replay", result)
@@ -125,24 +118,113 @@ class ValidationStages:
             progress=90,
             updated_at=now_iso(),
         )
-        diff_lines = len(self._read_patch_file(request.get("patch_file")).splitlines())
-        stable_p95 = 200.0
-        candidate_p95 = stable_p95 + min(float(diff_lines), 20.0)
-        latency_increase_pct = ((candidate_p95 - stable_p95) / stable_p95) * 100
-        failed = "slow" in request["candidate_image"] or latency_increase_pct > self.settings.max_p95_latency_increase_pct
-        result = ValidationStageResult(
-            status="fail" if failed else "pass",
-            summary="Candidate exceeded SLO thresholds" if failed else "Candidate remained within SLO thresholds",
-            metrics={
-                "stable_p95_ms": stable_p95,
-                "candidate_p95_ms": candidate_p95,
-                "p95_latency_increase_pct": latency_increase_pct,
+        result = self._llm_stage_result(
+            validation_job_id,
+            "slo",
+            request,
+            extra={
                 "max_p95_latency_increase_pct": self.settings.max_p95_latency_increase_pct,
-                "stable_error_rate": 0.2,
-                "candidate_error_rate": 1.8 if failed else 0.2,
+                "max_error_rate_increase_pp": self.settings.max_error_rate_increase_pp,
+                "max_throughput_drop_pct": self.settings.max_throughput_drop_pct,
+                "expected_decision": "fail if patch or build evidence indicates material latency, error-rate, or throughput regression",
             },
         )
         return self._save_stage(validation_job_id, "slo", result)
+
+    def _llm_stage_result(
+        self,
+        validation_job_id: str,
+        stage_name: str,
+        request: dict[str, Any],
+        *,
+        runtime_context: dict[str, Any] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> ValidationStageResult:
+        prompt = self._build_stage_prompt(stage_name, request, runtime_context, extra or {})
+        prompt_path = self.artifact_dir / "llm" / "prompts" / f"{validation_job_id}-{stage_name}.txt"
+        write_json(
+            self.artifact_dir / "llm" / "inputs" / f"{validation_job_id}-{stage_name}.json",
+            {
+                "stage": stage_name,
+                "request": request,
+                "runtime_context": runtime_context,
+                "extra": extra or {},
+            },
+        )
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        prompt_path.write_text(prompt, encoding="utf-8")
+        response = self.validation_client.generate_validation_json(
+            prompt=prompt,
+            workdir=self.settings.artifact_dir,
+            schema=self._llm_stage_schema(),
+        )
+        response_path = self.artifact_dir / "llm" / "responses" / f"{validation_job_id}-{stage_name}.json"
+        response_path.parent.mkdir(parents=True, exist_ok=True)
+        response_path.write_text(response.raw_text, encoding="utf-8")
+
+        status = response.payload.get("status")
+        if status not in {"pass", "fail"}:
+            raise ValueError(f"LLM validation output for {stage_name} must contain status=pass|fail")
+        summary = response.payload.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError(f"LLM validation output for {stage_name} must contain a non-empty summary")
+        metrics = response.payload.get("metrics") or {}
+        if not isinstance(metrics, dict):
+            raise ValueError(f"LLM validation output for {stage_name} must contain metrics object")
+        metrics = {
+            **metrics,
+            "llm_provider": response.provider,
+            "llm_model": response.model,
+            "llm_based": True,
+        }
+        return ValidationStageResult(status=status, summary=summary, metrics=metrics)
+
+    def _llm_stage_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["pass", "fail"]},
+                "summary": {"type": "string"},
+                "metrics": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+            },
+            "required": ["status", "summary", "metrics"],
+            "additionalProperties": False,
+        }
+
+    def _build_stage_prompt(
+        self,
+        stage_name: str,
+        request: dict[str, Any],
+        runtime_context: dict[str, Any] | None,
+        extra: dict[str, Any],
+    ) -> str:
+        patch_diff = self._read_patch_file(request.get("patch_file"))
+        evidence = {
+            "stage": stage_name,
+            "candidate": request,
+            "runtime_context": runtime_context,
+            "patch_diff": patch_diff[:12000],
+            "stage_rules": extra,
+        }
+        return "\n".join(
+            [
+                "You are the ELDEN RING Phase 3 Recovery Assurance validator.",
+                "Evaluate only the requested validation stage using the supplied candidate payload, runtime attack context, and patch diff.",
+                "Return only JSON matching this schema: {\"status\":\"pass|fail\",\"summary\":\"...\",\"metrics\":{...}}.",
+                "Do not include markdown fences or prose outside the JSON.",
+                "Be conservative: if evidence is missing or the patch does not convincingly address the requested stage, return fail.",
+                "Stage-specific guidance:",
+                "- startup: assess whether the candidate can boot and satisfy readiness/liveness based on build and image evidence.",
+                "- regression: assess whether the patch is minimal and unlikely to break existing behavior.",
+                "- security_replay: assess whether the original CWE payload is neutralized by the diff.",
+                "- slo: assess whether the patch is likely to stay within latency, error-rate, and throughput thresholds.",
+                "Evidence JSON:",
+                json.dumps(evidence, ensure_ascii=False, indent=2),
+            ]
+        )
 
     def _save_stage(self, validation_job_id: str, stage_name: str, result: ValidationStageResult) -> ValidationStageResult:
         path = self.artifact_dir / stage_name / f"{validation_job_id}.json"
@@ -182,12 +264,3 @@ class ValidationStages:
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8", errors="ignore")
-
-    def _security_fix_matches_cwe(self, cwe_id: str, diff: str) -> bool:
-        if cwe_id == "CWE-89":
-            return "%s" in diff or "execute(query, (" in diff or "?" in diff
-        if cwe_id == "CWE-79":
-            return "escape(" in diff or "html.escape" in diff
-        if cwe_id == "CWE-22":
-            return "resolve()" in diff or "safe_join" in diff or "Invalid path" in diff
-        return False

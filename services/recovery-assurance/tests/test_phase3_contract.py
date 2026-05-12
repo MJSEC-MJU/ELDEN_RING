@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -14,6 +15,23 @@ if str(SRC) not in sys.path:
 
 from recovery_assurance_plane.app import create_app
 from recovery_assurance_plane.config import Settings
+from recovery_assurance_plane.llm_validation import LlmValidationResponse
+
+
+class FakeValidationClient:
+    def generate_validation_json(self, *, prompt, workdir, schema):
+        stage = "security_replay" if '"stage": "security_replay"' in prompt else "generic"
+        failed = stage == "security_replay" and "unsafe string query still here" in prompt
+        return LlmValidationResponse(
+            payload={
+                "status": "fail" if failed else "pass",
+                "summary": "LLM validation failed" if failed else "LLM validation passed",
+                "metrics": {"stage": stage, "test_double": True},
+            },
+            raw_text='{"status":"pass","summary":"LLM validation passed","metrics":{}}',
+            provider="test_llm",
+            model=None,
+        )
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -53,10 +71,15 @@ def make_payload(patch_file: Path, image: str = "registry.local/target-app:candi
     }
 
 
+def make_app(tmp_path: Path):
+    with patch("recovery_assurance_plane.stages.create_validation_client", return_value=FakeValidationClient()):
+        return create_app(make_settings(tmp_path))
+
+
 def test_successful_validation_reaches_governance(tmp_path: Path) -> None:
     patch_file = tmp_path / "patch.diff"
     patch_file.write_text("+ cursor.execute(query, (username,))\n", encoding="utf-8")
-    app = create_app(make_settings(tmp_path))
+    app = make_app(tmp_path)
     client = TestClient(app)
 
     accepted = client.post("/api/v1/recovery-assurance/validate", json=make_payload(patch_file))
@@ -84,7 +107,7 @@ def test_successful_validation_reaches_governance(tmp_path: Path) -> None:
 def test_security_replay_failure_requests_retry(tmp_path: Path) -> None:
     patch_file = tmp_path / "patch.diff"
     patch_file.write_text("+ unsafe string query still here\n", encoding="utf-8")
-    app = create_app(make_settings(tmp_path))
+    app = make_app(tmp_path)
     client = TestClient(app)
 
     accepted = client.post("/api/v1/recovery-assurance/validate", json=make_payload(patch_file))
