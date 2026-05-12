@@ -465,22 +465,22 @@ function selectedLlmProvider() {
   return Q('#llm-provider').value || 'claude';
 }
 
-// Snap the dropdown to whatever provider is actually authenticated. Avoids
-// the "LLM unavailable" footgun where the default picks the wrong CLI.
-let _llmAutoSelected = false;
-function autoSelectAuthedProvider(status) {
-  if (_llmAutoSelected || !status || !status.providers) return;
+// Initialize the dropdown from the backend's active provider. Do not silently
+// switch to a different authenticated provider; that makes the OAuth pill lie
+// about the provider the smoke test will actually use.
+let _llmProviderInitialized = false;
+function syncActiveProvider(status) {
+  if (_llmProviderInitialized || !status || !status.providers) return;
   const sel = Q('#llm-provider');
-  const current = sel.value;
-  const currentAuthed = !!(status.providers[current] && status.providers[current].authenticated);
-  if (currentAuthed) { _llmAutoSelected = true; return; }
-  for (const name of ['claude', 'codex']) {
-    if (status.providers[name] && status.providers[name].authenticated) {
-      sel.value = name;
-      _llmAutoSelected = true;
-      return;
-    }
+  const active = status.active_provider;
+  if (active && status.providers[active]) {
+    sel.value = active;
   }
+  _llmProviderInitialized = true;
+}
+
+function providerLabel(provider) {
+  return provider === 'codex' ? 'Codex' : provider === 'claude' ? 'Claude' : provider;
 }
 
 function setLlmStatus(kind, text) {
@@ -500,11 +500,15 @@ async function refreshLlmStatus() {
     const r = await fetch('/api/llm/status');
     const d = await r.json();
     LLM.status = d;
-    autoSelectAuthedProvider(d);
+    syncActiveProvider(d);
+    const provider = selectedLlmProvider();
+    const label = providerLabel(provider);
     const p = currentProviderStatus();
-    if (!p || !p.available) setLlmStatus('err', 'CLI missing');
-    else if (p.authenticated) setLlmStatus('ok', 'OAuth ready');
-    else setLlmStatus('warn', 'login needed');
+    if (!p || !p.available) setLlmStatus('err', `${label} CLI missing`);
+    else if (!p.authenticated) setLlmStatus('warn', `${label} login needed`);
+    else if (p.llm_access === 'error') setLlmStatus('err', `${label} LLM blocked`);
+    else if (p.llm_access === 'ok') setLlmStatus('ok', `${label} LLM ready`);
+    else setLlmStatus('ok', `${label} OAuth connected`);
   } catch (e) {
     setLlmStatus('err', 'status error');
   }
@@ -722,13 +726,16 @@ async function runLlmSimulation() {
       setNode('p2','rejected','LLM unavailable');
       toast(`LLM smoke failed: ${d.error||'unknown'}`, 'error');
       showLlmPanel(`${provider} LLM smoke`, d.error || 'LLM smoke failed');
+      await refreshLlmStatus();
       return;
     }
+    await refreshLlmStatus();
     toast(`LLM smoke complete: ${d.patch_id}`, 'success');
     showLlmPanel(`${provider} LLM smoke`, `incident: ${d.incident_id}\npatch: ${d.patch_id}\nfix: ${d.security_fix}\n\n${d.patched_snippet}`);
   } catch (e) {
     setNode('p2','rejected','LLM failed');
     toast(`LLM smoke failed: ${e.message}`, 'error');
+    await refreshLlmStatus();
   }
 }
 window.runLlmSimulation = runLlmSimulation;

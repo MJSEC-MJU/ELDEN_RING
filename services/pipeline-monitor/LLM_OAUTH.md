@@ -9,6 +9,10 @@ The dashboard top bar includes an **LLM OAuth** control.
 
 `LLM Smoke` calls the selected CLI for a real patch generation against a CWE-89 sample, then replays synthetic Phase 1 -> Phase 2 -> Phase 3 -> Phase 4 events into the dashboard. The incident modal shows the LLM provider, security fix, generated diff, and patched snippet.
 
+The status API separates OAuth login from real model access: `oauth_connected`
+means the CLI account is logged in, while `llm_access` is only marked `ok` after
+the selected CLI successfully completes an `LLM Smoke` call.
+
 ## API
 
 | Endpoint | Description |
