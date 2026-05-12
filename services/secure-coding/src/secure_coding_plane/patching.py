@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import PlaneSettings
-from .llm_clients import LlmPatchClientError, LlmStructuredResponse, create_patch_client
+from .llm_clients import LlmConfigError, LlmPatchClientError, LlmStructuredResponse, create_patch_client
 from .schemas import PatchPayload, PatchResponse, PatchStrategy, RecheckResponse, RecheckResult
 from .storage import PlaneStore
 from .utils import generate_id, write_text
@@ -68,7 +68,8 @@ class SecureCodingPatchEngine:
             "llm_provider": llm_patch.get("provider", self.settings.secure_coding_llm_provider),
             "llm_model": llm_patch.get("model"),
             "llm_attempts": llm_patch.get("attempts", 1),
-            "llm_final_temperature": llm_patch.get("final_temperature"),
+            "llm_requested_temperature": llm_patch.get("final_temperature"),
+            "llm_temperature_applied": llm_patch.get("temperature_applied", False),
             "llm_usage": llm_patch.get("usage"),
         }
         patch = PatchPayload(
@@ -171,26 +172,29 @@ class SecureCodingPatchEngine:
         response, attempt, final_temp = self._call_llm_with_retry(job_id, prompt)
         response_path = self.artifact_root / "llm" / "responses" / f"{job_id}.json"
         write_text(response_path, response.raw_text)
-        patched_snippet = response.payload.get("patched_snippet")
-        if not isinstance(patched_snippet, str) or not patched_snippet.strip():
-            raise LlmPatchClientError("LLM output did not contain a valid patched_snippet")
-        change_summary = response.payload.get("change_summary") or {}
-        if not isinstance(change_summary, dict):
-            raise LlmPatchClientError("LLM output did not contain a valid change_summary object")
+        # retry 루프가 이미 patched_snippet + change_summary.security_fix 를 검증했음
         return {
-            "patched_snippet": patched_snippet,
-            "change_summary": change_summary,
+            "patched_snippet": response.payload["patched_snippet"],
+            "change_summary": response.payload["change_summary"],
             "provider": response.provider,
             "model": response.model,
             "attempts": attempt,
             "final_temperature": final_temp,
+            "temperature_applied": response.temperature_applied,
             "usage": response.usage,
         }
 
     def _call_llm_with_retry(self, job_id: str, prompt: str) -> tuple[LlmStructuredResponse, int, float]:
         """LLM 호출. 실패하면 MAX_PATCH_RETRY 까지 재시도하면서 temperature 를 단계적으로 올림.
 
-        실패 = LlmPatchClientError 또는 patched_snippet 누락. 마지막 attempt 실패 시 raise.
+        실패 (재시도 대상):
+          - LlmPatchClientError (네트워크/일시 오류)
+          - patched_snippet 누락 / 빈 문자열
+          - change_summary 가 dict 아님
+          - change_summary.security_fix 누락 / 빈 문자열
+
+        Non-retryable (즉시 raise):
+          - LlmConfigError (SDK 미설치 / auth / API key 누락 등)
         """
         max_attempts = max(1, self.settings.secure_coding_max_patch_retry)
         base_temp = self.settings.secure_coding_llm_temperature
@@ -212,12 +216,29 @@ class SecureCodingPatchEngine:
                     raise LlmPatchClientError(
                         f"LLM output missing patched_snippet on attempt {attempt}"
                     )
+                change_summary = response.payload.get("change_summary")
+                if not isinstance(change_summary, dict):
+                    raise LlmPatchClientError(
+                        f"LLM output missing change_summary dict on attempt {attempt}"
+                    )
+                security_fix = change_summary.get("security_fix")
+                if not isinstance(security_fix, str) or not security_fix.strip():
+                    raise LlmPatchClientError(
+                        f"LLM output missing change_summary.security_fix on attempt {attempt}"
+                    )
                 if attempt > 1:
                     logger.info(
                         "secure-coding: LLM retry success job=%s attempt=%d/%d temp=%.2f",
                         job_id, attempt, max_attempts, temperature,
                     )
                 return response, attempt, temperature
+            except LlmConfigError as e:
+                # non-retryable: 환경/인증 오류 — 재시도 의미 없음
+                logger.error(
+                    "secure-coding: LLM non-retryable error job=%s attempt=%d temp=%.2f: %s",
+                    job_id, attempt, temperature, e,
+                )
+                raise
             except LlmPatchClientError as e:
                 last_error = e
                 logger.warning(

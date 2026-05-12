@@ -12,6 +12,14 @@ from .config import PlaneSettings
 
 
 class LlmPatchClientError(RuntimeError):
+    """Retryable LLM error — 네트워크/일시적 응답 오류 등.
+    patching.py retry 루프가 다음 시도를 진행한다."""
+    pass
+
+
+class LlmConfigError(LlmPatchClientError):
+    """Non-retryable 환경/인증 오류 — SDK 미설치, API key 누락, auth 실패, CLI not found.
+    재시도해도 동일 결과이므로 retry 루프가 즉시 중단해야 한다."""
     pass
 
 
@@ -21,7 +29,9 @@ class LlmStructuredResponse:
     raw_text: str
     provider: str
     model: str | None
-    usage: dict[str, int] | None = None  # input/output tokens, cache hits 등
+    usage: dict[str, int] | None = None              # input/output tokens, cache hits
+    requested_temperature: float | None = None       # CLI provider 는 무시했더라도 기록
+    temperature_applied: bool = False                # SDK 호출에 실제 적용됐는지
 
 
 def create_patch_client(settings: PlaneSettings) -> "BasePatchCliClient":
@@ -40,7 +50,7 @@ def create_patch_client(settings: PlaneSettings) -> "BasePatchCliClient":
         )
     if provider in {"anthropic", "anthropic_sdk"}:
         if not settings.secure_coding_anthropic_api_key:
-            raise LlmPatchClientError(
+            raise LlmConfigError(
                 "anthropic provider requires SECURE_CODING_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY)"
             )
         return AnthropicSdkPatchClient(
@@ -50,11 +60,12 @@ def create_patch_client(settings: PlaneSettings) -> "BasePatchCliClient":
             max_tokens=settings.secure_coding_llm_max_tokens,
             prompt_cache_enabled=settings.secure_coding_prompt_cache_enabled,
         )
-    raise LlmPatchClientError(f"Unsupported LLM provider: {settings.secure_coding_llm_provider}")
+    raise LlmConfigError(f"Unsupported LLM provider: {settings.secure_coding_llm_provider}")
 
 
 class BasePatchCliClient:
     provider_name: str
+    supports_temperature: bool = False  # CLI wrappers default: 무시
 
     def __init__(self, *, command: str, model: str | None, timeout_sec: int) -> None:
         self.command = command
@@ -77,7 +88,7 @@ class BasePatchCliClient:
             return
         if shutil.which(self.command):
             return
-        raise LlmPatchClientError(f"{self.provider_name} CLI not found: {self.command}")
+        raise LlmConfigError(f"{self.provider_name} CLI not found: {self.command}")
 
     def _check_authentication(self) -> None:
         raise NotImplementedError
@@ -139,13 +150,14 @@ class BasePatchCliClient:
 
 class CodexPatchCliClient(BasePatchCliClient):
     provider_name = "codex"
+    supports_temperature = False  # codex CLI 는 temperature 플래그를 노출하지 않음
 
     def _check_authentication(self) -> None:
         completed = self._run([self.command, "login", "status"], cwd=Path.cwd())
         login_status = "\n".join(part.strip() for part in (completed.stdout, completed.stderr) if part.strip())
         if "Logged in" not in login_status:
             detail = login_status or "Codex login status unavailable"
-            raise LlmPatchClientError(f"Codex OAuth session not ready: {detail}")
+            raise LlmConfigError(f"Codex OAuth session not ready: {detail}")
 
     def generate_patch_json(
         self,
@@ -184,20 +196,23 @@ class CodexPatchCliClient(BasePatchCliClient):
                 raw_text=raw_text,
                 provider=self.provider_name,
                 model=self.model,
+                requested_temperature=temperature,
+                temperature_applied=False,
             )
 
 
 class ClaudeCodePatchCliClient(BasePatchCliClient):
     provider_name = "claude_code"
+    supports_temperature = False  # claude CLI 는 temperature 플래그를 노출하지 않음
 
     def _check_authentication(self) -> None:
         completed = self._run([self.command, "auth", "status"], cwd=Path.cwd())
         try:
             payload = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
-            raise LlmPatchClientError("Claude auth status output was not valid JSON") from exc
+            raise LlmConfigError("Claude auth status output was not valid JSON") from exc
         if not payload.get("loggedIn"):
-            raise LlmPatchClientError("Claude Code OAuth session not ready. Run `claude auth login` first.")
+            raise LlmConfigError("Claude Code OAuth session not ready. Run `claude auth login` first.")
 
     def generate_patch_json(
         self,
@@ -225,6 +240,8 @@ class ClaudeCodePatchCliClient(BasePatchCliClient):
             raw_text=raw_text,
             provider=self.provider_name,
             model=self.model,
+            requested_temperature=temperature,
+            temperature_applied=False,
         )
 
     def _extract_structured_output(self, raw_text: str) -> dict[str, Any]:
@@ -245,9 +262,13 @@ class ClaudeCodePatchCliClient(BasePatchCliClient):
 
 
 class AnthropicSdkPatchClient(BasePatchCliClient):
-    """Direct Anthropic SDK 호출. temperature + prompt cache_control 가 실제 작동."""
+    """Direct Anthropic SDK 호출. temperature + prompt cache_control 가 실제 작동.
+
+    CLI 래퍼 두 개(codex, claude_code) 와 달리 SDK 가 노출하는 모든 파라미터를 직접 제어한다.
+    """
 
     provider_name = "anthropic"
+    supports_temperature = True
 
     def __init__(self, *, api_key: str, model: str, timeout_sec: int, max_tokens: int, prompt_cache_enabled: bool) -> None:
         self.api_key = api_key
@@ -262,7 +283,7 @@ class AnthropicSdkPatchClient(BasePatchCliClient):
             try:
                 import anthropic
             except ImportError as e:
-                raise LlmPatchClientError(
+                raise LlmConfigError(
                     "anthropic Python SDK 미설치. requirements.txt 의 anthropic>=0.40 확인."
                 ) from e
             self._client = anthropic.Anthropic(api_key=self.api_key, timeout=self.timeout_sec)
@@ -270,7 +291,7 @@ class AnthropicSdkPatchClient(BasePatchCliClient):
 
     def _ensure_ready(self) -> None:
         if not self.api_key:
-            raise LlmPatchClientError("anthropic API key not set")
+            raise LlmConfigError("anthropic API key not set")
 
     def generate_patch_json(
         self,
@@ -313,13 +334,25 @@ class AnthropicSdkPatchClient(BasePatchCliClient):
             "system": system_blocks,
             "messages": user_messages,
         }
+        applied_temp: float | None = None
         if temperature is not None:
-            kwargs["temperature"] = max(0.0, min(temperature, 1.0))
+            applied_temp = max(0.0, min(temperature, 1.0))
+            kwargs["temperature"] = applied_temp
 
         try:
             response = client.messages.create(**kwargs)
         except Exception as e:
-            raise LlmPatchClientError(f"anthropic.messages.create failed: {e}") from e
+            etype = type(e).__name__
+            # SDK 의 명확한 non-retryable 클래스들: 재시도해도 동일 결과
+            if etype in {
+                "AuthenticationError",
+                "PermissionDeniedError",
+                "BadRequestError",
+                "NotFoundError",
+                "UnprocessableEntityError",
+            }:
+                raise LlmConfigError(f"anthropic non-retryable {etype}: {e}") from e
+            raise LlmPatchClientError(f"anthropic.messages.create failed ({etype}): {e}") from e
 
         text_chunks = []
         for block in response.content:
@@ -343,4 +376,6 @@ class AnthropicSdkPatchClient(BasePatchCliClient):
             provider=self.provider_name,
             model=self.model,
             usage=usage or None,
+            requested_temperature=temperature,
+            temperature_applied=applied_temp is not None,
         )
