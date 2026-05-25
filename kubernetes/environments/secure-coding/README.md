@@ -22,7 +22,9 @@
 | 컴포넌트 | 설명 | K8s 리소스 |
 |---|---|---|
 | API | 수동/관리 API, health check | Deployment container + Service |
-| Redis worker | Phase 1 context 수신, Phase 3 validation 발행, Phase 3 retry 수신 | Deployment sidecar container |
+| Redis worker | `elden:phase2:context:queue` BRPOP으로 Phase 1 context 수신, Phase 3 validation 발행, Phase 3/4 retry 수신 | Deployment sidecar container |
+
+Redis 연결은 `PLANE_REDIS_URL=redis://redis-master.elden-monitoring:6379/0`을 사용합니다. Phase 1 context는 Pub/Sub 알림 채널보다 영속 List queue인 `SECURE_CODING_INGEST_QUEUE=elden:phase2:context:queue`를 주 수신 경로로 소비합니다.
 
 기본 배포값은 시연 안정성을 위해 `SECURE_CODING_LLM_PROVIDER=mock`, `SECURE_CODING_BUILD_MODE=simulate`입니다. 실제 LLM/이미지 빌드를 쓰려면 컨테이너에 CLI/인증/빌드 권한을 넣고 환경변수를 `codex`/`command`로 바꿔야 합니다.
 

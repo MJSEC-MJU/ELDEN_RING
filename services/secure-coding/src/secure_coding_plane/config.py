@@ -12,6 +12,7 @@ class PlaneSettings:
     db_path: Path
     redis_url: str | None
     secure_coding_ingest_channel: str = "elden:phase2:context"
+    secure_coding_ingest_queue: str = "elden:phase2:context:queue"
     secure_coding_validate_channel: str = "elden:phase3:validate"
     secure_coding_retry_channel: str = "elden:phase2:retry"
     secure_coding_llm_provider: str = "codex"
@@ -41,6 +42,7 @@ def load_settings() -> PlaneSettings:
         db_path=db_path,
         redis_url=os.getenv("PLANE_REDIS_URL"),
         secure_coding_ingest_channel=os.getenv("SECURE_CODING_INGEST_CHANNEL", "elden:phase2:context"),
+        secure_coding_ingest_queue=os.getenv("SECURE_CODING_INGEST_QUEUE", "elden:phase2:context:queue"),
         secure_coding_validate_channel=os.getenv("SECURE_CODING_VALIDATE_CHANNEL", "elden:phase3:validate"),
         secure_coding_retry_channel=os.getenv("SECURE_CODING_RETRY_CHANNEL", "elden:phase2:retry"),
         secure_coding_llm_provider=os.getenv("SECURE_CODING_LLM_PROVIDER", "codex"),
