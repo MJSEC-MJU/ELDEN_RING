@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 from typing import Any
@@ -10,6 +11,9 @@ from .messaging import Redis
 from .schemas import RuntimeContextPackage, SecureCodingRetryRequest
 from .service import SecureCodingService
 from .storage import PlaneStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class SecureCodingWorker:
@@ -100,6 +104,33 @@ class SecureCodingWorker:
             return self.handle_ingest_payload(payload)
         return None
 
+    def _record_worker_error(self, *, source: str, payload: Any, exc: Exception) -> None:
+        logger.exception("secure-coding worker failed while processing %s", source)
+        self.store.save_message(
+            channel="secure-coding:worker:error",
+            direction="error",
+            payload={
+                "source": source,
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "payload_preview": self._payload_preview(payload),
+            },
+        )
+
+    def _payload_preview(self, payload: Any, limit: int = 2000) -> str:
+        try:
+            if isinstance(payload, bytes):
+                text = payload.decode("utf-8", errors="replace")
+            elif isinstance(payload, str):
+                text = payload
+            else:
+                text = json.dumps(payload, ensure_ascii=False, default=str)
+        except Exception:
+            text = repr(payload)
+        if len(text) > limit:
+            return f"{text[:limit]}...<truncated>"
+        return text
+
     def run_forever(self, sleep_sec: float = 1.0) -> None:
         if self._client is None:
             raise RuntimeError("Redis worker requires PLANE_REDIS_URL and redis package")
@@ -118,13 +149,21 @@ class SecureCodingWorker:
                     message = pubsub.get_message(timeout=0)
                     if not message:
                         break
-                    self._handle_pubsub_message(message, allow_ingest=use_ingest_pubsub_fallback)
+                    source = self._as_text(message.get("channel", "unknown-pubsub"))
+                    try:
+                        self._handle_pubsub_message(message, allow_ingest=use_ingest_pubsub_fallback)
+                    except Exception as exc:
+                        self._record_worker_error(source=source, payload=message.get("data"), exc=exc)
                     handled = True
 
                 if ingest_queue:
                     result = self._client.brpop(ingest_queue, timeout=queue_timeout)
                     if result:
-                        self._handle_queue_result(result)
+                        _queue_name, data = result
+                        try:
+                            self._handle_queue_result(result)
+                        except Exception as exc:
+                            self._record_worker_error(source=ingest_queue, payload=data, exc=exc)
                         handled = True
 
                 if not handled and not ingest_queue:
