@@ -96,6 +96,8 @@
   .stat-card { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:18px; }
   .stat-num  { font-size:36px; font-weight:800; line-height:1; }
   .stat-label{ font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:6px; }
+  .cwe-row { cursor:pointer; transition:background 0.15s ease; }
+  .cwe-row:hover, .cwe-row.active { background:rgba(34,211,238,0.1); }
 
   .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px;
                  color:#64748b; text-align:center; }
@@ -283,7 +285,7 @@
   </section>
 
   <!-- TAB 3: STATS -->
-  <section id="tab-stats" class="h-full p-4 hidden grid grid-cols-12 gap-4 grid-rows-[auto,1fr]">
+  <section id="tab-stats" class="h-full p-4 hidden grid grid-cols-12 gap-4 grid-rows-[auto,minmax(0,1fr),minmax(0,1fr)] overflow-auto">
     <div class="col-span-3 stat-card">
       <div class="stat-label">Total Incidents</div>
       <div id="s-total" class="stat-num">0</div>
@@ -300,11 +302,33 @@
       <div class="stat-label">Awaiting Approval</div>
       <div id="s-pending" class="stat-num text-yellow-400">0</div>
     </div>
-    <div class="col-span-6 card p-5">
-      <div class="card-title mb-3">Incidents by CWE</div>
+    <div class="col-span-7 card p-5 min-h-[280px]">
+      <div class="flex items-center justify-between mb-3">
+        <div class="card-title">Incidents by CWE</div>
+        <div class="text-xs text-slate-500">count + avg duration</div>
+      </div>
       <div class="h-[calc(100%-30px)]"><canvas id="chart-cwe"></canvas></div>
     </div>
-    <div class="col-span-6 card p-5">
+    <div class="col-span-5 card p-5 min-h-[280px] flex flex-col">
+      <div class="card-title mb-3">CWE Breakdown</div>
+      <div class="overflow-auto">
+        <table class="w-full text-sm">
+          <thead class="text-slate-400 text-xs uppercase border-b border-slate-700">
+            <tr>
+              <th class="text-left py-2">CWE</th>
+              <th class="text-right">Count</th>
+              <th class="text-right">Avg</th>
+            </tr>
+          </thead>
+          <tbody id="cwe-breakdown-rows"></tbody>
+        </table>
+      </div>
+      <div class="mt-4 pt-3 border-t border-slate-700">
+        <div id="cwe-recent-title" class="text-xs uppercase tracking-wide text-slate-500 font-bold mb-2">Recent incidents</div>
+        <div id="cwe-recent-list" class="space-y-2 text-xs"></div>
+      </div>
+    </div>
+    <div class="col-span-6 card p-5 min-h-[260px]">
       <div class="card-title mb-3">Incidents by Risk</div>
       <div class="h-[calc(100%-30px)]"><canvas id="chart-risk"></canvas></div>
     </div>
@@ -396,7 +420,7 @@
 <script>
 const Q = (s)=>document.querySelector(s);
 const QA= (s)=>document.querySelectorAll(s);
-const STATE = { incidents:[], events:[], stats:{} };
+const STATE = { incidents:[], events:[], stats:{}, selectedCwe:null };
 
 // ---- toast ----
 function toast(msg, kind='info') {
@@ -943,6 +967,78 @@ Q('#m-close').addEventListener('click', ()=>{ Q('#modal').classList.add('hidden'
 
 // ---- charts ----
 let chartCwe, chartRisk;
+function escapeHtml(s) {
+  return (s ?? '').toString().replace(/[<>&"]/g, c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+}
+
+function formatDuration(seconds) {
+  if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return '—';
+  const s = Number(seconds);
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
+
+function cweBreakdownRows() {
+  const detailed = STATE.stats.cwe_breakdown || {};
+  const fallback = STATE.stats.by_cwe || {};
+  const rows = Object.keys(detailed).length
+    ? Object.entries(detailed).map(([cwe, data]) => ({
+        cwe_id: cwe,
+        count: data.count || 0,
+        avg_duration_seconds: data.avg_duration_seconds,
+        recent_incidents: data.recent_incidents || [],
+      }))
+    : Object.entries(fallback).map(([cwe, count]) => ({
+        cwe_id: cwe,
+        count,
+        avg_duration_seconds: null,
+        recent_incidents: [],
+      }));
+  return rows.sort((a,b) => (b.count - a.count) || a.cwe_id.localeCompare(b.cwe_id));
+}
+
+function renderCweBreakdown(rows) {
+  const body = Q('#cwe-breakdown-rows');
+  if (!rows.length) {
+    STATE.selectedCwe = null;
+    body.innerHTML = '<tr><td colspan="3" class="py-4 text-center text-slate-500">No CWE data yet</td></tr>';
+    Q('#cwe-recent-title').textContent = 'Recent incidents';
+    Q('#cwe-recent-list').innerHTML = '<div class="text-slate-500">Waiting for pipeline events.</div>';
+    return;
+  }
+
+  if (!STATE.selectedCwe || !rows.some(r => r.cwe_id === STATE.selectedCwe)) {
+    STATE.selectedCwe = rows[0].cwe_id;
+  }
+
+  body.innerHTML = rows.map(row => `
+    <tr class="cwe-row border-b border-slate-800 ${row.cwe_id === STATE.selectedCwe ? 'active' : ''}" data-cwe="${escapeHtml(row.cwe_id)}">
+      <td class="py-2 font-mono text-cyan-300">${escapeHtml(row.cwe_id)}</td>
+      <td class="py-2 text-right font-semibold">${row.count}</td>
+      <td class="py-2 text-right text-slate-300">${formatDuration(row.avg_duration_seconds)}</td>
+    </tr>
+  `).join('');
+  QA('.cwe-row').forEach(row => row.addEventListener('click', () => {
+    STATE.selectedCwe = row.dataset.cwe;
+    renderCweBreakdown(rows);
+  }));
+
+  const selected = rows.find(r => r.cwe_id === STATE.selectedCwe);
+  Q('#cwe-recent-title').textContent = `${selected.cwe_id} recent incidents`;
+  const recent = selected.recent_incidents || [];
+  Q('#cwe-recent-list').innerHTML = recent.length ? recent.map(item => `
+    <button class="w-full text-left bg-slate-900/70 hover:bg-slate-800 border border-slate-800 rounded px-3 py-2"
+            data-cwe-incident="${escapeHtml(item.incident_id)}">
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-mono text-cyan-300 truncate">${escapeHtml(item.incident_id)}</span>
+        <span class="text-slate-400">${formatDuration(item.duration_seconds)}</span>
+      </div>
+      <div class="mt-1 text-slate-500">${escapeHtml(item.stage || 'pending')} ${item.risk ? '· '+escapeHtml(item.risk) : ''}</div>
+    </button>
+  `).join('') : '<div class="text-slate-500">No recent incidents for this CWE.</div>';
+  QA('[data-cwe-incident]').forEach(btn => btn.addEventListener('click', () => openModal(btn.dataset.cweIncident)));
+}
+
 function renderCharts() {
   const s = STATE.stats;
   Q('#s-total').textContent  = s.total_incidents||0;
@@ -950,13 +1046,24 @@ function renderCharts() {
   Q('#s-high').textContent   = (s.by_risk||{}).high || 0;
   Q('#s-pending').textContent= (s.by_stage||{}).manual_approval || 0;
 
-  const cweLabels = Object.keys(s.by_cwe||{});
-  const cweData   = Object.values(s.by_cwe||{});
+  const cweRows = cweBreakdownRows();
+  renderCweBreakdown(cweRows);
+  const cweLabels = cweRows.map(row => row.cwe_id);
+  const cweData   = cweRows.map(row => row.count);
   if (chartCwe) chartCwe.destroy();
   chartCwe = new Chart(Q('#chart-cwe').getContext('2d'), {
     type: 'bar',
     data: { labels: cweLabels.length?cweLabels:['—'], datasets:[{ data: cweData.length?cweData:[0], backgroundColor:'#22d3ee', borderRadius:6 }]},
-    options: { plugins:{legend:{display:false}}, scales:{ y:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' } }, x:{ ticks:{ color:'#94a3b8' }, grid:{ display:false } } }, maintainAspectRatio:false }
+    options: {
+      onClick: (_evt, elements) => {
+        if (!elements.length) return;
+        STATE.selectedCwe = cweLabels[elements[0].index];
+        renderCweBreakdown(cweRows);
+      },
+      plugins:{legend:{display:false}},
+      scales:{ y:{ ticks:{ color:'#94a3b8' }, grid:{ color:'#1e293b' } }, x:{ ticks:{ color:'#94a3b8' }, grid:{ display:false } } },
+      maintainAspectRatio:false
+    }
   });
   const riskLabels = ['low','medium','high'];
   const riskData = riskLabels.map(k => (s.by_risk||{})[k]||0);

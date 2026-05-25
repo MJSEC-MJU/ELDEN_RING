@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from collections import Counter, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -115,9 +115,14 @@ class PipelineState:
             gi = by_id.get(rid)
             if not gi:
                 continue
-            rec.risk = gi.get("risk")
-            rec.branch = gi.get("branch")
-            rec.phase4_stage = gi.get("stage", rec.phase4_stage)
+            risk = gi.get("risk")
+            branch = gi.get("branch")
+            stage = gi.get("stage", rec.phase4_stage)
+            if risk != rec.risk or branch != rec.branch or stage != rec.phase4_stage:
+                rec.last_at = time.time()
+            rec.risk = risk
+            rec.branch = branch
+            rec.phase4_stage = stage
 
     def snapshot_incidents(self) -> list[dict[str, Any]]:
         out = []
@@ -126,6 +131,7 @@ class PipelineState:
                 "incident_id": rec.incident_id,
                 "started_at": rec.started_at,
                 "last_at": rec.last_at,
+                "duration_seconds": self._duration_seconds(rec),
                 "stage": rec.phase4_stage,
                 "risk": rec.risk,
                 "cwe_id": rec.cwe_id,
@@ -141,19 +147,49 @@ class PipelineState:
 
     def stats(self) -> dict[str, Any]:
         cwe_counter: Counter[str] = Counter()
+        cwe_duration_totals: defaultdict[str, float] = defaultdict(float)
+        cwe_recent: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
         risk_counter: Counter[str] = Counter()
         stage_counter: Counter[str] = Counter()
         for r in self.incidents.values():
+            duration = self._duration_seconds(r)
             if r.cwe_id:
                 cwe_counter[r.cwe_id] += 1
+                cwe_duration_totals[r.cwe_id] += duration
+                cwe_recent[r.cwe_id].append(
+                    {
+                        "incident_id": r.incident_id,
+                        "stage": r.phase4_stage,
+                        "risk": r.risk,
+                        "duration_seconds": duration,
+                        "last_at": r.last_at,
+                    }
+                )
             if r.risk:
                 risk_counter[r.risk] += 1
             stage_counter[r.phase4_stage] += 1
+        cwe_breakdown = {
+            cwe_id: {
+                "count": count,
+                "avg_duration_seconds": round(cwe_duration_totals[cwe_id] / count, 3),
+                "recent_incidents": sorted(
+                    cwe_recent[cwe_id],
+                    key=lambda item: item["last_at"],
+                    reverse=True,
+                )[:5],
+            }
+            for cwe_id, count in cwe_counter.items()
+        }
         return {
             "total_incidents": len(self.incidents),
             "total_events": sum(self.totals_by_channel.values()),
             "by_channel": dict(self.totals_by_channel),
             "by_cwe": dict(cwe_counter),
+            "cwe_breakdown": cwe_breakdown,
             "by_risk": dict(risk_counter),
             "by_stage": dict(stage_counter),
         }
+
+    @staticmethod
+    def _duration_seconds(rec: IncidentRecord) -> float:
+        return round(max(0.0, rec.last_at - rec.started_at), 3)

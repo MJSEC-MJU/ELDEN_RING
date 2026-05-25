@@ -8,7 +8,7 @@ Phase 2만 담당하는 독립 서비스다. 입력으로 `RuntimeContextPackage
 - `src/secure_coding_plane/schemas.py`: Phase 2 전용 Pydantic 모델
 - `src/secure_coding_plane/storage.py`: SQLite 기반 job/artifact store
 - `src/secure_coding_plane/messaging.py`: Redis publish helper
-- `src/secure_coding_plane/worker.py`: Redis subscribe worker
+- `src/secure_coding_plane/worker.py`: Redis queue/retry worker
 - `src/secure_coding_plane/*.py`: analysis, strategy, patch, apply, build 엔진
 
 이 디렉토리는 `elden_planes` 공용 패키지에 의존하지 않는다.
@@ -30,6 +30,7 @@ Redis worker를 별도로 띄우려면:
 ```powershell
 cd services/secure-coding
 $env:PLANE_REDIS_URL = "redis://localhost:6379/0"
+$env:SECURE_CODING_INGEST_QUEUE = "elden:phase2:context:queue"
 python -m src.worker
 ```
 
@@ -46,6 +47,10 @@ python -m unittest discover tests -v
 - `PLANE_ARTIFACT_ROOT`: diff, snapshot, build log 저장 위치
 - `PLANE_DB_PATH`: SQLite DB 경로
 - `PLANE_REDIS_URL`: Redis 연결 문자열
+- `SECURE_CODING_INGEST_QUEUE`: Phase 1 context 영속 큐. 기본값 `elden:phase2:context:queue`
+- `SECURE_CODING_INGEST_CHANNEL`: Pub/Sub fallback 채널. 기본값 `elden:phase2:context`
+- `SECURE_CODING_VALIDATE_CHANNEL`: Phase 3 검증 요청 발행 채널. 기본값 `elden:phase3:validate`
+- `SECURE_CODING_RETRY_CHANNEL`: Phase 3/4 실패 retry 수신 채널. 기본값 `elden:phase2:retry`
 - `SECURE_CODING_LLM_PROVIDER`: `codex`, `claude`
 - `SECURE_CODING_BUILD_MODE`: `simulate`, `command`
 - `SECURE_CODING_BUILD_COMMAND`: 실제 이미지 빌드 명령

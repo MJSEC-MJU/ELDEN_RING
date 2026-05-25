@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -123,6 +124,58 @@ class SecureCodingWorkerTests(unittest.TestCase):
         self.assertEqual("COMPLETED", job["status"])
         messages = self.worker.store.list_messages(self.settings.secure_coding_validate_channel)
         self.assertEqual(2, len(messages))
+
+    def test_run_forever_consumes_ingest_queue_and_subscribes_retry_only(self) -> None:
+        class StopWorker(Exception):
+            pass
+
+        class FakePubSub:
+            def __init__(self) -> None:
+                self.subscribed: tuple[str, ...] = ()
+                self.closed = False
+
+            def subscribe(self, *channels: str) -> None:
+                self.subscribed = channels
+
+            def get_message(self, timeout: float = 0) -> None:
+                return None
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeRedis:
+            def __init__(self, payload: dict) -> None:
+                self.pubsub_obj = FakePubSub()
+                self.payload = payload
+                self.brpop_calls: list[tuple[str, int]] = []
+
+            def pubsub(self, ignore_subscribe_messages: bool = True) -> FakePubSub:
+                return self.pubsub_obj
+
+            def brpop(self, queue: str, timeout: int = 0) -> tuple[str, str]:
+                self.brpop_calls.append((queue, timeout))
+                if len(self.brpop_calls) == 1:
+                    return (queue, json.dumps(self.payload))
+                raise StopWorker()
+
+        fake = FakeRedis(self._context())
+        self.worker._client = fake
+
+        with self.assertRaises(StopWorker):
+            self.worker.run_forever(sleep_sec=1.0)
+
+        self.assertEqual(
+            [self.settings.secure_coding_retry_channel],
+            list(fake.pubsub_obj.subscribed),
+        )
+        self.assertEqual(
+            [(self.settings.secure_coding_ingest_queue, 1), (self.settings.secure_coding_ingest_queue, 1)],
+            fake.brpop_calls,
+        )
+        self.assertTrue(fake.pubsub_obj.closed)
+        job = self.worker.store.get_secure_job_by_event("evt-001")
+        self.assertIsNotNone(job)
+        self.assertEqual("COMPLETED", job["status"])
 
 
 if __name__ == "__main__":

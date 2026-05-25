@@ -8,7 +8,7 @@ ELDEN RING 4-Phase 파이프라인의 실시간 시각화 + 결과 대시보드.
 |---|---|
 | **Live Pipeline** | 4-phase 노드 다이어그램, 메시지 흐를 때 노드 하이라이트 + 엣지 애니메이션, 실시간 이벤트 로그 |
 | **Incidents** | 모든 incident 테이블, 행 클릭 시 Phase 1~4 전체 결과를 보여주는 상세 모달 |
-| **Stats** | 카운터 (전체 incident, high-risk, manual approval 대기) + CWE/Risk 분포 차트 |
+| **Stats** | 카운터 (전체 incident, high-risk, manual approval 대기) + CWE/Risk 분포, CWE별 평균 처리 시간과 최근 incident 드릴다운 |
 
 ## 동작 원리
 
@@ -75,7 +75,7 @@ kubectl port-forward -n elden-monitoring svc/pipeline-monitor 3000:80
 | `GET /healthz` | health check |
 | `GET /api/incidents` | 모든 incident 스냅샷 (Phase 1~4 정보 포함) |
 | `GET /api/events` | 최근 이벤트 (최대 500건) |
-| `GET /api/stats` | 통계 (CWE/Risk/Stage 분포) |
+| `GET /api/stats` | 통계 (CWE/Risk/Stage 분포, CWE별 평균 처리 시간/최근 incident) |
 | `WS /ws` | 실시간 이벤트 + incident 업데이트 push |
 
 ## 시연 시나리오

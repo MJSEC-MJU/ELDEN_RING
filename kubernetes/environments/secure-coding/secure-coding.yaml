@@ -31,6 +31,8 @@ spec:
               value: redis://redis-master.elden-monitoring:6379/0
             - name: SECURE_CODING_INGEST_CHANNEL
               value: elden:phase2:context
+            - name: SECURE_CODING_INGEST_QUEUE
+              value: elden:phase2:context:queue
             - name: SECURE_CODING_VALIDATE_CHANNEL
               value: elden:phase3:validate
             - name: SECURE_CODING_RETRY_CHANNEL
