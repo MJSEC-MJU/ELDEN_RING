@@ -38,6 +38,22 @@ CWE_MAP = {
         "cwe_name": "Server-Side Request Forgery",
         "owasp": "A10:2021",
     },
+    # Phase 1 Week 11 — detection scope expansion (6-category coverage)
+    "Command Injection": {
+        "cwe_id": "CWE-78",
+        "cwe_name": "Improper Neutralization of Special Elements used in an OS Command",
+        "owasp": "A03:2021",
+    },
+    "Server-Side Request Forgery": {
+        "cwe_id": "CWE-918",
+        "cwe_name": "Server-Side Request Forgery",
+        "owasp": "A10:2021",
+    },
+    "Insecure Deserialization": {
+        "cwe_id": "CWE-502",
+        "cwe_name": "Deserialization of Untrusted Data",
+        "owasp": "A08:2021",
+    },
 }
 
 UNKNOWN_CWE = {"cwe_id": "UNKNOWN", "cwe_name": "Unmapped Attack Type", "owasp": "UNKNOWN"}
