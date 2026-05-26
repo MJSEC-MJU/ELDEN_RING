@@ -11,10 +11,25 @@ from src.models import NormalizedEvent, TargetEndpoint
 from src.payload_utils import truncate_payload
 
 # CRS Rule ID range -> attack category
+#
+# Phase 1 Week 11 — detection scope expanded from 3 → 6 categories.
+# We do NOT author new rules; we re-classify CRS hits into the CWE the
+# Phase 2 patch worker keys off. Ranges are exclusive-upper (Python range).
+#
+# CRS reference (v3.3):
+#   930xxx  LFI / Path Traversal             → CWE-22
+#   932xxx  RCE / OS Command Injection        → CWE-78
+#   934100-934129  Node.js Injection + SSRF   → CWE-918
+#   934130-934999  PHP/Java Deserialization   → CWE-502
+#   941xxx  XSS                               → CWE-79
+#   942xxx  SQL Injection                     → CWE-89
 MODSEC_RULE_CATEGORY_MAP = {
     range(942100, 943000): "SQL Injection",
     range(941100, 942000): "Cross-Site Scripting",
     range(930100, 931000): "Path Traversal",
+    range(932100, 933000): "Command Injection",
+    range(934100, 934130): "Server-Side Request Forgery",
+    range(934130, 935000): "Insecure Deserialization",
 }
 
 

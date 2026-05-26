@@ -15,6 +15,13 @@ FALCO_CATEGORY_MAP = {
     "network": "Suspicious Network",
     "filesystem": "File Tampering",
     "privilege-escalation": "Privilege Escalation",
+    # Phase 1 Week 11 — three-rule scope expansion (CWE-78/918/502).
+    # Tag values match the `tags:` block of the corresponding Falco rule
+    # in kubernetes/security/falco/values.yaml; do not rename without
+    # updating that file in lockstep.
+    "command-injection": "Command Injection",
+    "ssrf": "Server-Side Request Forgery",
+    "insecure-deserialization": "Insecure Deserialization",
 }
 
 FALCO_PRIORITY_MAP = {

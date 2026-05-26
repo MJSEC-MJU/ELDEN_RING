@@ -115,6 +115,16 @@ async def run_pipeline(event: NormalizedEvent) -> dict:
             event.target_endpoint.method, event.target_endpoint.path
         )
 
+        # Week 11 measurement pipeline — stamp the per-CWE detection time
+        # so the cross-phase correlator can subtract from Phase 4's
+        # promotion timestamp without sweeping every Loki line.
+        metrics.detections_by_cwe_total.labels(
+            cwe_id=cwe["cwe_id"], attack_category=event.attack_category
+        ).inc()
+        metrics.detected_at_unixseconds.labels(
+            trace_id=trace_id, cwe_id=cwe["cwe_id"],
+        ).set(time.time())
+
         defense_action = await defense_mgr.handle_defense(event)
 
         context = build_context(event, cwe, source_map, defense_action, trace_id=trace_id)
