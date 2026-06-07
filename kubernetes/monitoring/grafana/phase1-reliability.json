@@ -1,0 +1,64 @@
+{
+  "annotations": {"list": []},
+  "title": "ELDEN RING — Phase 1 Reliability",
+  "uid": "elden-phase1-reliability",
+  "tags": ["elden-ring", "phase1", "reliability"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {"from": "now-30m", "to": "now"},
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "title": "Throughput + HPA replicas (Scenario A)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(runtime_defense_events_total[1m]))",
+          "legendFormat": "events/sec (1m rate)"
+        },
+        {
+          "refId": "B",
+          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"elden-production\",horizontalpodautoscaler=\"runtime-defense-controller\"}",
+          "legendFormat": "HPA current_replicas"
+        },
+        {
+          "refId": "C",
+          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"elden-production\",horizontalpodautoscaler=\"runtime-defense-controller\"}",
+          "legendFormat": "HPA desired_replicas"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"custom": {"lineInterpolation": "stepAfter"}},
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Redis outage + backup queue length (Scenario B)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 8, "w": 24, "h": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "runtime_defense_redis_up",
+          "legendFormat": "redis_up (0/1)"
+        },
+        {
+          "refId": "B",
+          "expr": "runtime_defense_redis_backup_pending",
+          "legendFormat": "backup queue length"
+        },
+        {
+          "refId": "C",
+          "expr": "runtime_defense_redis_backup_dropped_total",
+          "legendFormat": "drops (cumulative)"
+        }
+      ],
+      "fieldConfig": {"defaults": {"custom": {"lineInterpolation": "stepAfter"}}, "overrides": []}
+    }
+  ]
+}

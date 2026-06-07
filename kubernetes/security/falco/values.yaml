@@ -10,8 +10,9 @@ falco:
     enabled: true
     url: "http://falco-sidekick.elden-monitoring:2801"
 
-  rules:
-    # ELDEN RING 전용 탐지 규칙
+# ELDEN RING 전용 탐지 규칙 (customRules로 마운트)
+customRules:
+  elden-ring-rules.yaml: |-
     - macro: elden_ring_namespace
       condition: k8s.ns.name startswith "elden-"
 
@@ -97,6 +98,81 @@ falco:
         command=%proc.cmdline)
       priority: CRITICAL
       tags: [runtime-defense, sqli]
+
+    # ----------------------------------------------------------------
+    # Phase 1 Week 11 — detection scope expansion (3 → 6 categories).
+    # Each rule below corresponds 1:1 with a CRS / CWE category covered
+    # by the runtime-defense controller's cwe_mapping.py.
+    # ----------------------------------------------------------------
+
+    # 6. Command Injection (CWE-78) — web server (java/python/node/php/ruby)
+    #    spawning an OS shell or one-liner exec helper is a strong RCE signal.
+    - rule: ELDEN Command Injection via Web Process
+      desc: >-
+        Web framework processes (java/python/node/php/ruby) spawning a
+        shell or remote-fetch tool — classic CWE-78 post-exploitation.
+      condition: >
+        spawned_process and
+        container and
+        elden_ring_namespace and
+        (proc.pname in (java, python, python3, node, php, php-fpm, ruby, gunicorn, uwsgi)) and
+        (proc.name in (sh, bash, dash, zsh, ksh, ash) or
+         proc.name in (nc, ncat, netcat, wget, curl, busybox, perl) or
+         proc.cmdline contains "/bin/sh -c" or
+         proc.cmdline contains "bash -c")
+      output: >
+        Command injection: shell/fetch tool spawned by web process
+        (namespace=%k8s.ns.name pod=%k8s.pod.name
+        parent=%proc.pname child=%proc.name command=%proc.cmdline)
+      priority: CRITICAL
+      tags: [runtime-defense, command-injection]
+
+    # 7. SSRF (CWE-918) — outbound syscall to cloud metadata endpoint.
+    #    169.254.169.254 is the IMDS address used by AWS / GCP / Azure /
+    #    OpenStack. There is no legitimate reason for elden-* workloads
+    #    to reach it; any connect() from a container is an SSRF probe.
+    - rule: ELDEN SSRF Cloud Metadata Access
+      desc: >-
+        Container reached the cloud metadata IP (169.254.169.254) at the
+        syscall layer — CWE-918 SSRF probing IMDS for credentials.
+      condition: >
+        (evt.type in (connect, sendto, sendmsg)) and
+        evt.dir = "<" and
+        container and
+        elden_ring_namespace and
+        fd.sip = "169.254.169.254"
+      output: >
+        SSRF probe to cloud metadata endpoint
+        (namespace=%k8s.ns.name pod=%k8s.pod.name
+        process=%proc.name command=%proc.cmdline
+        connection=%fd.name)
+      priority: CRITICAL
+      tags: [runtime-defense, ssrf]
+
+    # 8. Insecure Deserialization (CWE-502) — RCE via Java/Python deserialization
+    #    surfaces as a JVM/Python parent spawning sh, or as a Java process
+    #    invoking common gadget chains (ysoserial, commons-collections).
+    - rule: ELDEN Insecure Deserialization Post-Exploit
+      desc: >-
+        Suspicious child process from a deserialization-prone runtime
+        (Java/Python). Common CWE-502 gadget-chain post-exploit pattern.
+      condition: >
+        spawned_process and
+        container and
+        elden_ring_namespace and
+        (proc.pname in (java, python, python3, ruby, dotnet)) and
+        (proc.name in (sh, bash, dash, zsh) or
+         proc.cmdline contains "Runtime.exec" or
+         proc.cmdline contains "ysoserial" or
+         proc.cmdline contains "commons-collections" or
+         proc.cmdline contains "pickle.loads" or
+         proc.cmdline contains "yaml.load")
+      output: >
+        Insecure deserialization gadget-chain pattern
+        (namespace=%k8s.ns.name pod=%k8s.pod.name
+        parent=%proc.pname child=%proc.name command=%proc.cmdline)
+      priority: CRITICAL
+      tags: [runtime-defense, insecure-deserialization]
 
 # Falco Sidekick: 이벤트를 외부로 전달
 falcosidekick:

@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline-monitor-sa
+  namespace: elden-monitoring
+  labels:
+    app: pipeline-monitor
+---
+# Persist LLM CLI OAuth credentials so pod restarts don't kick the user out
+# of Claude / Codex. Both CLIs write to $HOME (~/.claude, ~/.codex), so we
+# mount a single PVC at /home/mon and let them write whatever they need.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pipeline-monitor-llm-home
+  namespace: elden-monitoring
+  labels:
+    app: pipeline-monitor
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-monitor
+  namespace: elden-monitoring
+  labels:
+    app: pipeline-monitor
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # PVC is RWO; Recreate avoids old/new pod fighting over the mount
+  selector:
+    matchLabels:
+      app: pipeline-monitor
+  template:
+    metadata:
+      labels:
+        app: pipeline-monitor
+    spec:
+      serviceAccountName: pipeline-monitor-sa
+      securityContext:
+        # mount the PVC owned by the non-root container UID so claude/codex
+        # can chmod 600 their token files without EPERM.
+        fsGroup: 1001
+      containers:
+        - name: monitor
+          image: ghcr.io/mjsec-mju/elden-pipeline-monitor:v0.4.10-claude-autopick
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - { name: MONITOR_REDIS_URL, value: "redis://redis-master.elden-monitoring:6379/0" }
+            - { name: MONITOR_GOVERNANCE_URL, value: "http://governance-controller.elden-governance:8080" }
+            - { name: LOG_LEVEL, value: "INFO" }
+            - { name: HOME, value: "/home/mon" }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits:   { cpu: 1500m, memory: 2Gi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - { name: llm-home, mountPath: /home/mon }
+      volumes:
+        - name: llm-home
+          persistentVolumeClaim:
+            claimName: pipeline-monitor-llm-home
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pipeline-monitor
+  namespace: elden-monitoring
+  labels:
+    app: pipeline-monitor
+spec:
+  selector:
+    app: pipeline-monitor
+  ports:
+    - port: 80
+      targetPort: 8080
+      name: http

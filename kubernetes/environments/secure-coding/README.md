@@ -15,16 +15,18 @@
 | 최대 Pod | 15 |
 | 최대 Job | 10 |
 
-## 이 폴더에 올릴 것
+## 현재 배포 구성
 
-### 필요한 컴포넌트
+`secure-coding.yaml`은 Phase 2 API와 Redis worker를 같은 Pod에 배포합니다.
 
 | 컴포넌트 | 설명 | K8s 리소스 |
 |---|---|---|
-| Context Receiver | Phase 1에서 컨텍스트 수신 | Deployment + Service |
-| Code Analyzer | Semgrep/AST 정적 분석 | Job |
-| Patch Generator | LLM 패치 생성 + 정적 재검사 | Job |
-| Image Builder | 후보 이미지 빌드 | Job |
+| API | 수동/관리 API, health check | Deployment container + Service |
+| Redis worker | `elden:phase2:context:queue` BRPOP으로 Phase 1 context 수신, Phase 3 validation 발행, Phase 3/4 retry 수신 | Deployment sidecar container |
+
+Redis 연결은 `PLANE_REDIS_URL=redis://redis-master.elden-monitoring:6379/0`을 사용합니다. Phase 1 context는 Pub/Sub 알림 채널보다 영속 List queue인 `SECURE_CODING_INGEST_QUEUE=elden:phase2:context:queue`를 주 수신 경로로 소비합니다.
+
+기본 배포값은 시연 안정성을 위해 `SECURE_CODING_LLM_PROVIDER=mock`, `SECURE_CODING_BUILD_MODE=simulate`입니다. 실제 LLM/이미지 빌드를 쓰려면 컨테이너에 CLI/인증/빌드 권한을 넣고 환경변수를 `codex`/`command`로 바꿔야 합니다.
 
 ## Phase 1에서 받는 데이터
 
@@ -43,9 +45,9 @@
 {
   "event_id": "evt-20260321-001",
   "patch_id": "patch-001",
-  "candidate_image": "registry.local/app/target-app:candidate-evt-20260321-001-v1",
+  "candidate_image": "ghcr.io/mjsec-mju/elden-target-app:candidate-evt-20260321-001-patch-001",
   "change_summary": { "files_changed": 1, "functions_changed": ["login_handler"] },
-  "status": "ready_for_validation"
+  "patch_status": "READY_FOR_VALIDATION"
 }
 ```
 
@@ -65,5 +67,5 @@
 ## 배포 방법
 
 ```bash
-kubectl apply -f kubernetes/environments/secure-coding/<매니페스트>.yaml
+kubectl apply -f kubernetes/environments/secure-coding/
 ```

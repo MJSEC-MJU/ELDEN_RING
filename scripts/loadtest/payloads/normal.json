@@ -1,0 +1,16 @@
+{
+  "transaction": {
+    "time": "2026-05-11T10:00:00Z",
+    "remote_address": "10.0.0.42",
+    "request": {
+      "method": "POST",
+      "uri": "/api/login",
+      "body": "username=demo&password=demo1234"
+    }
+  },
+  "audit_data": {
+    "messages": [
+      {"details": {"ruleId": "920350", "severity": "NOTICE", "message": "Missing host header"}}
+    ]
+  }
+}

@@ -1,0 +1,128 @@
+# ============================================================
+# ELDEN RING - Runtime Defense Controller (Phase 1)
+# Receives ModSecurity audit logs + Falco webhooks
+# Normalizes -> CWE maps -> source maps -> context build -> Redis -> Phase 2
+# Executes active defense: rate limit, IP block, endpoint disable
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: runtime-defense-controller
+  namespace: elden-production
+  labels:
+    app: runtime-defense-controller
+    elden-ring/plane: runtime-defense
+spec:
+  # HPA(min=2)와 정합. 롤링 업데이트 중 항상 최소 1대는 가용해야
+  # Falco/ModSec 웹훅 누락이 최소화된다.
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: runtime-defense-controller
+  template:
+    metadata:
+      labels:
+        app: runtime-defense-controller
+        elden-ring/plane: runtime-defense
+      annotations:
+        sidecar.istio.io/inject: "true"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: runtime-defense-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: ghcr.io/mjsec-mju/elden-runtime-defense:dev-latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 8080
+              name: http
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: REDIS_HOST
+              value: "redis-master.elden-monitoring"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: ROUTE_MAP_PATH
+              value: "/config/routes.json"
+            - name: K8S_NAMESPACE
+              value: "elden-production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: WEBHOOK_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: runtime-defense-secrets
+                  key: webhook-auth-token
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: route-map
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: kube-cache
+              mountPath: /home/app/.kube
+      volumes:
+        - name: route-map
+          configMap:
+            name: route-map
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: kube-cache
+          emptyDir:
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: runtime-defense-controller
+  namespace: elden-production
+  labels:
+    app: runtime-defense-controller
+    elden-ring/plane: runtime-defense
+spec:
+  selector:
+    app: runtime-defense-controller
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  type: ClusterIP

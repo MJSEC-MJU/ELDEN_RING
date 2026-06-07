@@ -1,0 +1,37 @@
+# ============================================================
+# B. GitOps — Production app, MANUAL sync only
+# Promotion = merge dev → main + governance-bot triggers sync.
+# No automated prune / selfHeal: prod is the audit-of-record.
+# ============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: elden-prod
+  namespace: argocd
+  labels:
+    elden-ring/layer: b-gitops
+    elden-ring/stage: prod
+  annotations:
+    elden-ring/promotion-gate: "manual"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: elden
+  source:
+    repoURL: https://github.com/MJSEC-MJU/ELDEN_RING.git
+    targetRevision: main
+    path: kubernetes/environments/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: elden-production
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+  revisionHistoryLimit: 50

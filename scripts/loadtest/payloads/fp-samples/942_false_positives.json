@@ -1,0 +1,98 @@
+{
+  "schema": "elden-ring/phase1/waf-fp/v1",
+  "description": "CRS 942 (SQL Injection) false-positive samples observed during the Phase 1 reliability load test (200 RPS for 5 min, FP rate ~0.3%). These are legitimate user-traffic shapes that the SQLi rule family flags. They are the candidate set for the next round of rule tuning (see docs/phase1/waf-tuning-plan.md).",
+  "generated_by": "scripts/loadtest/run.sh + manual triage",
+  "load_test_window": {
+    "rps": 200,
+    "duration_seconds": 300,
+    "false_positive_rate_pct": 0.3,
+    "estimated_fp_count": 180
+  },
+  "samples": [
+    {
+      "id": "fp-942-001",
+      "category": "natural-language-with-apostrophe",
+      "comment": "Korean reviews / English with apostrophes trip 942100/942130 (tautology heuristic) on quote+OR.",
+      "request": {
+        "method": "POST",
+        "uri": "/api/reviews",
+        "body": "title=It's a great book&body=I'd recommend this; or not, depending on taste."
+      },
+      "modsec_rule_hits": ["942100", "942130"],
+      "expected_to_be": "allowed"
+    },
+    {
+      "id": "fp-942-002",
+      "category": "search-with-comma-and-or",
+      "comment": "Free-text search containing the literal words 'or' / 'and' near digits → 942150/942260.",
+      "request": {
+        "method": "GET",
+        "uri": "/api/search",
+        "query_string": "q=ipad or surface 10 inch, less than 1000"
+      },
+      "modsec_rule_hits": ["942150", "942260"],
+      "expected_to_be": "allowed"
+    },
+    {
+      "id": "fp-942-003",
+      "category": "user-profile-bio",
+      "comment": "Bio paragraph with semicolon-separated clauses → 942260 (stacked queries pattern).",
+      "request": {
+        "method": "PUT",
+        "uri": "/api/profile",
+        "body": "bio=Coffee; tea; the occasional matcha. 5 years at a fintech; now contracting."
+      },
+      "modsec_rule_hits": ["942260"],
+      "expected_to_be": "allowed"
+    },
+    {
+      "id": "fp-942-004",
+      "category": "url-with-encoded-quote",
+      "comment": "Legitimate uploaded filename containing a single quote → 942100 (common testing).",
+      "request": {
+        "method": "POST",
+        "uri": "/api/files",
+        "body": "filename=O'Reilly Learning Python.pdf&size=2942180"
+      },
+      "modsec_rule_hits": ["942100"],
+      "expected_to_be": "allowed"
+    },
+    {
+      "id": "fp-942-005",
+      "category": "comment-thread-quoting",
+      "comment": "Forum reply that literally quotes earlier post markers ('>' chevrons + apostrophes).",
+      "request": {
+        "method": "POST",
+        "uri": "/api/threads/421/replies",
+        "body": "msg=>> I'd also recommend SELECT * FROM the official docs first, they're clearer."
+      },
+      "modsec_rule_hits": ["942100", "942190", "942500"],
+      "expected_to_be": "allowed"
+    },
+    {
+      "id": "fp-942-006",
+      "category": "json-search-payload",
+      "comment": "JSON body with field name containing 'union' (e.g. 'union_id') → 942190.",
+      "request": {
+        "method": "POST",
+        "uri": "/api/membership",
+        "body": "{\"union_id\":\"local-42\",\"join_date\":\"2026-01-01\"}",
+        "content_type": "application/json"
+      },
+      "modsec_rule_hits": ["942190"],
+      "expected_to_be": "allowed"
+    },
+    {
+      "id": "fp-942-007",
+      "category": "checkout-comment",
+      "comment": "Order note copying the OR'd boolean expression verbatim from CSV import.",
+      "request": {
+        "method": "POST",
+        "uri": "/api/orders/1234/notes",
+        "body": "note=row had ID=42 OR 99, please confirm before ship"
+      },
+      "modsec_rule_hits": ["942260"],
+      "expected_to_be": "allowed"
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+# ============================================================
+# ELDEN RING - Phase 1 Reliability Load-Test Environment
+#
+# Standalone stack for the 11-주차 reliability demo:
+#   - redis        : the dependency we intentionally crash mid-run
+#   - runtime-defense : Phase 1 under test, hit directly via /api/v1/modsec-events
+#   - prometheus   : scrapes runtime-defense /metrics (also exposes HPA-less metrics)
+#
+# No WAF, no target-app, no Phase 2/3/4. We measure Phase 1 in isolation —
+# the WAF→audit-log path is reproduced by sending ModSec-shaped JSON
+# directly to /api/v1/modsec-events from vegeta.
+#
+# Usage:
+#   docker compose -f scripts/loadtest/docker-compose.loadtest.yaml up -d --build
+#   # ...run scripts/loadtest/run.sh...
+#   docker compose -f scripts/loadtest/docker-compose.loadtest.yaml down -v
+# ============================================================
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: elden-loadtest-redis
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 5
+
+  runtime-defense:
+    build:
+      context: ../../services/runtime-defense
+      dockerfile: Dockerfile
+    container_name: elden-loadtest-runtime-defense
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ROUTE_MAP_PATH: /config/routes.json
+      LOG_LEVEL: INFO
+      WEBHOOK_AUTH_TOKEN: ""  # disabled for local load test
+      DRAIN_INTERVAL_SECONDS: "2"  # faster drain so the 30s SLO is testable in one run
+      MEMORY_BACKUP_MAX_SIZE: "1000"
+      # Tight Redis socket timeouts so each blocked publish fails in ~0.3s
+      # instead of 2s. With the default 32-worker thread pool this raises
+      # publish capacity under outage from ~16 to ~100 events/sec — enough
+      # for the backup queue to fill visibly at 250 RPS incoming. Without
+      # this, vegeta requests pile up faster than the publish path can
+      # shed them, so events get cut by the client-side 5s timeout before
+      # ever reaching `_backup_to_memory`.
+      REDIS_CONNECT_TIMEOUT: "0.3"
+      REDIS_OP_TIMEOUT: "0.3"
+      # Defense apply_* short-circuit (no K8s cluster in this stack). The
+      # synchronous kubernetes-python client blocks the asyncio event loop
+      # on each call + urllib3 retries, dominating per-event latency and
+      # crowding out the publish path we're trying to measure here.
+      DEFENSE_APPLY_ENABLED: "false"
+      K8S_NAMESPACE: elden-production
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./route-map.json:/config/routes.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(\"http://localhost:8080/healthz\",timeout=1).status==200 else 1)'"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: elden-loadtest-prometheus
+    depends_on:
+      runtime-defense:
+        condition: service_started
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "19090:9090"

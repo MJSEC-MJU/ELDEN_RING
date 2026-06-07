@@ -1,0 +1,64 @@
+# ============================================================
+# A. Policy Validation — 기존 서비스와 충돌 방지
+# AI 패치가 core service selector / ingress host / port 를
+# 덮어쓰는 것을 차단한다.
+# ============================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: elden-no-conflict-with-existing
+  labels:
+    elden-ring/layer: a-policy-validation
+    elden-ring/risk: medium
+  annotations:
+    policies.kyverno.io/title: Prevent conflicts with existing services
+    policies.kyverno.io/category: elden-governance
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: protect-core-services
+      match:
+        any:
+          - resources:
+              kinds: [Service]
+              namespaces: ["elden-production"]
+              names:
+                - "target-app"
+                - "runtime-defense"
+      preconditions:
+        any:
+          - key: "{{ request.operation }}"
+            operator: Equals
+            value: UPDATE
+      validate:
+        message: "운영 core Service 의 selector/port 는 governance 승인 없이 변경 불가"
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.selector }}"
+                operator: NotEquals
+                value: "{{ request.oldObject.spec.selector }}"
+              - key: "{{ request.object.spec.ports[*].port | to_string(@) }}"
+                operator: NotEquals
+                value: "{{ request.oldObject.spec.ports[*].port | to_string(@) }}"
+    - name: protect-ingress-host
+      match:
+        any:
+          - resources:
+              kinds: [VirtualService]
+              namespaces: ["elden-production"]
+      preconditions:
+        any:
+          - key: "{{ request.operation }}"
+            operator: Equals
+            value: UPDATE
+      validate:
+        message: "운영 VirtualService host 변경은 governance 승인 필요"
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.hosts | to_string(@) }}"
+                operator: NotEquals
+                value: "{{ request.oldObject.spec.hosts | to_string(@) }}"

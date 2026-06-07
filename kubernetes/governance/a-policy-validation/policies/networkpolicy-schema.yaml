@@ -1,0 +1,48 @@
+# ============================================================
+# A. Policy Validation — AI 생성 NetworkPolicy 스키마/안전성 검증
+# ============================================================
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: elden-networkpolicy-schema
+  labels:
+    elden-ring/layer: a-policy-validation
+    elden-ring/risk: medium
+  annotations:
+    policies.kyverno.io/title: NetworkPolicy schema + safety
+    policies.kyverno.io/category: elden-governance
+    policies.kyverno.io/severity: medium
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: deny-allow-all-ingress
+      match:
+        any:
+          - resources:
+              kinds: [NetworkPolicy]
+              namespaces: ["elden-production", "elden-canary"]
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.ingress || `[]` | length(@) }}"
+            operator: GreaterThan
+            value: 0
+      validate:
+        message: "prod/canary 에서 ingress from:[] (전체 허용) 은 금지"
+        deny:
+          conditions:
+            all:
+              - key: "{{ request.object.spec.ingress[?!from] || `[]` | length(@) }}"
+                operator: GreaterThan
+                value: 0
+    - name: require-policy-types
+      match:
+        any:
+          - resources:
+              kinds: [NetworkPolicy]
+              namespaces: ["elden-*"]
+      validate:
+        message: "policyTypes 명시 필수 (Ingress/Egress 양쪽 의도 확인용)"
+        pattern:
+          spec:
+            policyTypes: "?*"
