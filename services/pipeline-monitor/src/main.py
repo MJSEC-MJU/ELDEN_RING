@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
 import logging
 import os
 import time
@@ -11,11 +12,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-
-from fastapi import Body
+from redis import Redis
 
 from .llm_oauth import (
     LlmOAuthError,
@@ -39,6 +39,8 @@ logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
 REDIS_URL = os.environ.get("MONITOR_REDIS_URL", "redis://redis-master.elden-monitoring:6379/0")
 GOV_URL = os.environ.get("MONITOR_GOVERNANCE_URL", "http://governance-controller.elden-governance:8080")
 PHASE1_URL = os.environ.get("MONITOR_PHASE1_URL", "http://runtime-defense.elden-production:8080")
+TARGET_URL = os.environ.get("MONITOR_TARGET_URL", "http://target-app:5000")
+ROLLBACK_CHANNEL = os.environ.get("MONITOR_ROLLBACK_CHANNEL", "elden:demo:rollback")
 STATIC_DIR = Path(__file__).parent / "static"
 
 state = PipelineState()
@@ -68,6 +70,44 @@ async def _set_llm_telemetry(**fields: Any) -> dict[str, Any]:
         snapshot = dict(LLM_TELEMETRY)
     await ws_mgr.broadcast({"type": "llm_telemetry", "telemetry": snapshot})
     return snapshot
+
+
+def _short_body(text: str, limit: int = 1200) -> str:
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
+async def _target_get(path: str) -> dict[str, Any]:
+    started = time.time()
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.get(f"{TARGET_URL}{path}")
+    elapsed_ms = int((time.time() - started) * 1000)
+    try:
+        body: Any = r.json()
+    except Exception:
+        body = {"raw": _short_body(r.text)}
+    return {"status_code": r.status_code, "elapsed_ms": elapsed_ms, "body": body}
+
+
+async def _target_login(username: str, password: str, *, probe: bool = False) -> dict[str, Any]:
+    started = time.time()
+    headers = {"X-ELDEN-Probe": "target-status"} if probe else None
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        r = await client.post(
+            f"{TARGET_URL}/api/login",
+            data={"username": username, "password": password},
+            headers=headers,
+        )
+    elapsed_ms = int((time.time() - started) * 1000)
+    try:
+        body: Any = r.json()
+    except Exception:
+        body = {"raw": _short_body(r.text)}
+    return {
+        "status_code": r.status_code,
+        "elapsed_ms": elapsed_ms,
+        "body": body,
+        "username": username,
+    }
 
 
 async def _on_message(channel: str, payload: dict) -> None:
@@ -134,6 +174,83 @@ async def get_events() -> JSONResponse:
 @app.get("/api/stats")
 async def get_stats() -> JSONResponse:
     return JSONResponse(state.stats())
+
+
+@app.get("/api/target/status")
+async def get_target_status() -> JSONResponse:
+    response: dict[str, Any] = {
+        "target_url": TARGET_URL,
+        "ready": None,
+        "valid_login": None,
+        "sqli_replay": None,
+        "state": "unknown",
+        "error": None,
+    }
+    try:
+        response["ready"] = await _target_get("/readyz")
+        response["valid_login"] = await _target_login("demo", "demo1234", probe=True)
+        response["sqli_replay"] = await _target_login("admin' OR 1=1 -- ", "irrelevant", probe=True)
+
+        replay = response["sqli_replay"] or {}
+        body = replay.get("body") or {}
+        vulnerable = replay.get("status_code") == 200 and body.get("status") == "success"
+        if vulnerable:
+            response["state"] = "vulnerable"
+        elif replay.get("status_code") in {400, 401, 403}:
+            response["state"] = "patched"
+        else:
+            response["state"] = "unknown"
+    except Exception as exc:
+        response["error"] = str(exc)
+    return JSONResponse(response)
+
+
+def _publish_rollback(request_id: str) -> None:
+    client = Redis.from_url(REDIS_URL, decode_responses=True)
+    client.publish(
+        ROLLBACK_CHANNEL,
+        json.dumps(
+            {
+                "request_id": request_id,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "source": "pipeline-monitor",
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+
+@app.post("/api/rollback")
+async def rollback_demo() -> JSONResponse:
+    request_id = f"rollback-{uuid.uuid4().hex[:8]}"
+    try:
+        await asyncio.to_thread(_publish_rollback, request_id)
+        state.clear()
+        await ws_mgr.broadcast({
+            "type": "snapshot",
+            "incidents": state.snapshot_incidents(),
+            "events": list(state.events),
+            "stats": state.stats(),
+            "llm_telemetry": dict(LLM_TELEMETRY),
+        })
+        return JSONResponse({
+            "status": "sent",
+            "request_id": request_id,
+            "message": "rollback requested; target-app will be rebuilt from the vulnerable baseline",
+        })
+    except Exception as exc:
+        return JSONResponse({"status": "error", "error": str(exc), "request_id": request_id}, status_code=502)
+
+
+@app.post("/api/target/login")
+async def post_target_login(body: dict = Body(...)) -> JSONResponse:
+    username = str((body or {}).get("username", ""))
+    password = str((body or {}).get("password", ""))
+    try:
+        result = await _target_login(username, password)
+        return JSONResponse({"target_url": TARGET_URL, "result": result})
+    except Exception as exc:
+        return JSONResponse({"target_url": TARGET_URL, "error": str(exc)}, status_code=502)
 
 
 @app.get("/api/llm/status")
@@ -249,34 +366,26 @@ async def simulate_llm_secure_coding(provider: str = "codex") -> JSONResponse:
 
 @app.post("/api/inject")
 async def inject_attack(scenario: str = "sqli") -> JSONResponse:
-    presets = {
-        "sqli": {
-            "attack_category": "SQL Injection",
-            "target_endpoint": {"method": "POST", "path": "/api/login"},
-            "payload_sample": "admin' OR 1=1 --",
-            "source_ip": "10.0.0.99",
-            "severity": "HIGH",
-        },
-        "xss": {
-            "attack_category": "Reflected XSS",
-            "target_endpoint": {"method": "GET", "path": "/api/search"},
-            "payload_sample": "<script>alert(1)</script>",
-            "source_ip": "192.0.2.42",
-            "severity": "MEDIUM",
-        },
-        "path": {
-            "attack_category": "Path Traversal",
-            "target_endpoint": {"method": "GET", "path": "/api/file"},
-            "payload_sample": "../../../etc/passwd",
-            "source_ip": "203.0.113.55",
-            "severity": "HIGH",
-        },
-    }
-    body = presets.get(scenario, presets["sqli"])
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.post(f"{PHASE1_URL}/api/v1/events/manual", json=body)
-            return JSONResponse({"status": "sent", "phase1_response": r.json(), "scenario": scenario})
+            if scenario == "xss":
+                r = await client.get(f"{TARGET_URL}/api/search", params={"q": "<script>alert(1)</script>"})
+            elif scenario == "path":
+                r = await client.get(f"{TARGET_URL}/api/file", params={"name": "../../../etc/passwd"})
+            else:
+                r = await client.post(
+                    f"{TARGET_URL}/api/login",
+                    data={"username": "admin' OR 1=1 -- ", "password": "irrelevant"},
+                )
+            try:
+                body: Any = r.json()
+            except Exception:
+                body = {"raw": _short_body(r.text)}
+            return JSONResponse({
+                "status": "sent",
+                "scenario": scenario,
+                "target_response": {"status_code": r.status_code, "body": body},
+            })
     except Exception as e:
         return JSONResponse({"status": "error", "error": str(e), "scenario": scenario}, status_code=502)
 

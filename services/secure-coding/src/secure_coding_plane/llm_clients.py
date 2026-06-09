@@ -26,6 +26,8 @@ class LlmStructuredResponse:
 
 def create_patch_client(settings: PlaneSettings) -> "BasePatchCliClient":
     provider = settings.secure_coding_llm_provider.lower()
+    if provider in {"builtin", "mock"}:
+        return BuiltinPatchCliClient(provider=provider, model=settings.secure_coding_codex_model)
     if provider == "codex":
         return CodexPatchCliClient(
             command=settings.secure_coding_codex_command,
@@ -122,6 +124,156 @@ class BasePatchCliClient:
                     continue
                 return payload
         raise LlmPatchClientError(f"{self.provider_name} output was not valid JSON")
+
+
+class BuiltinPatchCliClient:
+    provider_name = "builtin"
+
+    def __init__(self, *, provider: str = "builtin", model: str | None = None) -> None:
+        self.provider_name = provider
+        self.model = model
+
+    def generate_patch_json(
+        self,
+        *,
+        prompt: str,
+        workdir: Path,
+        schema: dict[str, Any],
+    ) -> LlmStructuredResponse:
+        if "CWE-79" in prompt:
+            patched_snippet = self._patch_xss(prompt)
+            security_fix = "HTML-escape reflected user-controlled content"
+        elif "CWE-22" in prompt:
+            patched_snippet = self._patch_path_traversal(prompt)
+            security_fix = "canonicalize requested files and reject paths outside the base directory"
+        else:
+            patched_snippet = self._patch_sqli(prompt)
+            security_fix = "replace raw SQL interpolation with parameterized query binding"
+
+        payload = {
+            "patched_snippet": patched_snippet,
+            "change_summary": {"security_fix": security_fix},
+        }
+        return LlmStructuredResponse(
+            payload=payload,
+            raw_text=json.dumps(payload, ensure_ascii=False),
+            provider=self.provider_name,
+            model=self.model,
+        )
+
+    def _patch_sqli(self, prompt: str) -> str:
+        snippet = self._extract_original_snippet(prompt)
+        if (
+            "def login_handler():" in snippet
+            and "execute(query, (" in snippet
+            and "cursor.execute(query)" not in snippet
+        ):
+            return snippet
+        if "def login_handler():" in snippet and "cursor.execute(query)" in snippet:
+            return "\n".join(
+                [
+                    "def login_handler():",
+                    "    username = request.form.get(\"username\", \"\")",
+                    "    password = request.form.get(\"password\", \"\")",
+                    "",
+                    "    conn = sqlite3.connect(DB_PATH)",
+                    "    cursor = conn.cursor()",
+                    "    query = \"SELECT * FROM users WHERE username=? AND password=?\"",
+                    "    try:",
+                    "        cursor.execute(query, (username, password))",
+                    "        user = cursor.fetchone()",
+                    "    except sqlite3.OperationalError as e:",
+                    "        conn.close()",
+                    "        return jsonify({\"status\": \"error\", \"message\": str(e)}), 400",
+                    "    conn.close()",
+                    "",
+                    "    if user:",
+                    "        return jsonify({\"status\": \"success\", \"user\": user[1]}), 200",
+                    "    return jsonify({\"status\": \"fail\", \"message\": \"Invalid credentials\"}), 401",
+                ]
+            )
+        return "\n".join(
+            [
+                "def login_handler():",
+                "    username = request.form.get(\"username\", \"\")",
+                "    password = request.form.get(\"password\", \"\")",
+                "",
+                "    conn = sqlite3.connect(DB_PATH)",
+                "    cursor = conn.cursor()",
+                "    query = \"SELECT * FROM users WHERE username=? AND password=?\"",
+                "    try:",
+                "        cursor.execute(query, (username, password))",
+                "        user = cursor.fetchone()",
+                "    except sqlite3.OperationalError as e:",
+                "        conn.close()",
+                "        return jsonify({\"status\": \"error\", \"message\": str(e)}), 400",
+                "    conn.close()",
+                "",
+                "    if user:",
+                "        return jsonify({\"status\": \"success\", \"user\": user[1]}), 200",
+                "    return jsonify({\"status\": \"fail\", \"message\": \"Invalid credentials\"}), 401",
+            ]
+        )
+
+    def _patch_xss(self, prompt: str) -> str:
+        snippet = self._extract_original_snippet(prompt)
+        if "def search_handler():" in snippet:
+            return "\n".join(
+                [
+                    "def search_handler():",
+                    "    from markupsafe import escape",
+                    "",
+                    "    query = request.args.get(\"q\", \"\")",
+                    "    safe_query = escape(query)",
+                    "    html = (",
+                    "        f\"<html><body>\"",
+                    "        f\"<h1>Search Results for: {safe_query}</h1>\"",
+                    "        f\"<p>No results found.</p>\"",
+                    "        f\"</body></html>\"",
+                    "    )",
+                    "    return render_template_string(html)",
+                ]
+            )
+        return "\n".join(
+            [
+                "def render_feedback(content):",
+                "    from markupsafe import escape",
+                "    return f\"<div>{escape(content)}</div>\"",
+            ]
+        )
+
+    def _patch_path_traversal(self, prompt: str) -> str:
+        snippet = self._extract_original_snippet(prompt)
+        if "def file_handler():" in snippet:
+            return "\n".join(
+                [
+                    "def file_handler():",
+                    "    filename = request.args.get(\"name\", \"\")",
+                    "    base_dir = os.path.realpath(\"/app/uploads\")",
+                    "    requested_path = os.path.realpath(os.path.join(base_dir, filename))",
+                    "    if not requested_path.startswith(base_dir + os.sep):",
+                    "        return jsonify({\"error\": \"Invalid path\"}), 400",
+                    "    if os.path.exists(requested_path):",
+                    "        return send_file(requested_path)",
+                    "    return jsonify({\"error\": \"File not found\"}), 404",
+                ]
+            )
+        return "\n".join(
+            [
+                "def download_file(filename):",
+                "    base_dir = os.path.realpath(BASE_DIR)",
+                "    requested = os.path.realpath(os.path.join(base_dir, filename))",
+                "    if not requested.startswith(base_dir + os.sep):",
+                "        raise ValueError(\"Invalid path\")",
+                "    return open(requested, 'rb').read()",
+            ]
+        )
+
+    def _extract_original_snippet(self, prompt: str) -> str:
+        marker = "Original vulnerable snippet:"
+        if marker not in prompt:
+            return ""
+        return prompt.split(marker, 1)[1].strip()
 
 
 class CodexPatchCliClient(BasePatchCliClient):

@@ -304,6 +304,10 @@ class PlaneStore:
             (retry_id, job_id, retry_from_step, reason, self._dumps(validation_feedback), utcnow_iso()),
         )
 
+    def count_secure_retry_requests(self, job_id: str) -> int:
+        row = self._fetchone("SELECT COUNT(*) AS retry_count FROM secure_retry_requests WHERE job_id = ?", (job_id,))
+        return int(row["retry_count"]) if row else 0
+
     def save_message(self, *, channel: str, direction: str, payload: dict[str, Any]) -> None:
         self._execute(
             """

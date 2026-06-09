@@ -36,7 +36,7 @@ def build_context(
             "pipeline_version": PIPELINE_VERSION,
             "detection_source": event.source,
             "defense_action_taken": defense_action,
-            "requires_patch": cwe["cwe_id"] != "UNKNOWN",
+            "requires_patch": event.requires_patch if event.requires_patch is not None else cwe["cwe_id"] != "UNKNOWN",
             "trace_id": trace_id,
         },
     }

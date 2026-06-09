@@ -60,7 +60,10 @@ class ValidationStages:
             request,
             extra={
                 "startup_timeout_seconds": self.settings.startup_timeout_seconds,
-                "expected_decision": "fail if candidate_image is empty or startup evidence indicates boot/readiness failure",
+                "expected_decision": (
+                    "pass if candidate_image is present and build evidence shows a candidate image was produced; "
+                    "the Compose deploy-agent performs the concrete /readyz, valid-login, and exploit replay checks after promotion"
+                ),
             },
         )
         return self._save_stage(validation_job_id, "startup", result)
@@ -79,6 +82,10 @@ class ValidationStages:
             request,
             extra={
                 "expected_decision": "fail if patch evidence suggests unrelated behavior changes or regression evidence is negative",
+                "idempotent_rule": (
+                    "if patch_diff is empty or whitespace-only but patched_source_excerpt shows the target function is already remediated, "
+                    "do not fail solely because the diff is minimal"
+                ),
             },
         )
         return self._save_stage(validation_job_id, "regression", result)
@@ -106,6 +113,10 @@ class ValidationStages:
                     "pass only if the patch diff plausibly neutralizes the original CWE and payload; "
                     "fail if vulnerable string interpolation, unescaped rendering, or path traversal remains"
                 ),
+                "idempotent_rule": (
+                    "patched_source_excerpt is authoritative candidate source evidence; "
+                    "if the source already neutralizes the CWE, pass even when patch_diff is a no-op/idempotent retry"
+                ),
             },
         )
         return self._save_stage(validation_job_id, "security_replay", result)
@@ -127,6 +138,7 @@ class ValidationStages:
                 "max_error_rate_increase_pp": self.settings.max_error_rate_increase_pp,
                 "max_throughput_drop_pct": self.settings.max_throughput_drop_pct,
                 "expected_decision": "fail if patch or build evidence indicates material latency, error-rate, or throughput regression",
+                "idempotent_rule": "a no-op retry against already-remediated source has no material SLO risk unless evidence says otherwise",
             },
         )
         return self._save_stage(validation_job_id, "slo", result)
@@ -173,9 +185,9 @@ class ValidationStages:
             raise ValueError(f"LLM validation output for {stage_name} must contain metrics object")
         metrics = {
             **metrics,
-            "llm_provider": response.provider,
+            "validator_provider": response.provider,
             "llm_model": response.model,
-            "llm_based": True,
+            "llm_based": response.provider not in {"builtin", "mock"},
         }
         return ValidationStageResult(status=status, summary=summary, metrics=metrics)
 
@@ -187,7 +199,8 @@ class ValidationStages:
                 "summary": {"type": "string"},
                 "metrics": {
                     "type": "object",
-                    "additionalProperties": True,
+                    "properties": {},
+                    "additionalProperties": False,
                 },
             },
             "required": ["status", "summary", "metrics"],
@@ -202,20 +215,29 @@ class ValidationStages:
         extra: dict[str, Any],
     ) -> str:
         patch_diff = self._read_patch_file(request.get("patch_file"))
+        build_log = self._read_text_file(request.get("build_log"))
+        change_summary = request.get("change_summary") if isinstance(request.get("change_summary"), dict) else {}
+        patched_source_path = request.get("patched_file_path") or change_summary.get("patched_file_path")
+        patched_source = self._read_text_file(patched_source_path)
         evidence = {
             "stage": stage_name,
             "candidate": request,
             "runtime_context": runtime_context,
             "patch_diff": patch_diff[:12000],
+            "build_log_excerpt": build_log[:12000],
+            "patched_source_excerpt": patched_source[:12000],
             "stage_rules": extra,
         }
         return "\n".join(
             [
                 "You are the ELDEN RING Phase 3 Recovery Assurance validator.",
-                "Evaluate only the requested validation stage using the supplied candidate payload, runtime attack context, and patch diff.",
+                "Evaluate only the requested validation stage using the supplied candidate payload, runtime attack context, patch diff, build log, and patched source excerpt.",
                 "Return only JSON matching this schema: {\"status\":\"pass|fail\",\"summary\":\"...\",\"metrics\":{...}}.",
                 "Do not include markdown fences or prose outside the JSON.",
                 "Be conservative: if evidence is missing or the patch does not convincingly address the requested stage, return fail.",
+                "Important: patched_source_excerpt is authoritative candidate source evidence, not just a claim.",
+                "Important: for idempotent retries, patch_diff may be empty or whitespace-only because the workspace is already remediated.",
+                "In that idempotent case, do not fail solely because the diff lacks the original vulnerable lines if patched_source_excerpt clearly shows the target CWE is neutralized.",
                 "Stage-specific guidance:",
                 "- startup: assess whether the candidate can boot and satisfy readiness/liveness based on build and image evidence.",
                 "- regression: assess whether the patch is minimal and unlikely to break existing behavior.",
@@ -256,9 +278,12 @@ class ValidationStages:
             self.store.update_job(validation_job_id, **updates)
 
     def _read_patch_file(self, patch_file: str | None) -> str:
-        if not patch_file:
+        return self._read_text_file(patch_file)
+
+    def _read_text_file(self, file_path: str | None) -> str:
+        if not file_path:
             return ""
-        path = Path(patch_file)
+        path = Path(file_path)
         if not path.is_absolute():
             path = Path.cwd() / path
         if not path.exists():

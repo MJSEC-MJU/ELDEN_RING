@@ -156,9 +156,27 @@ class SecureCodingService:
         job = self.store.get_secure_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Unknown job_id")
+        retry_count = self.store.count_secure_retry_requests(job_id)
+        if retry_count >= self.settings.secure_coding_max_retries:
+            self.store.update_secure_job(
+                job_id,
+                status="FAILED",
+                current_step="retry_limit_exceeded",
+                progress=100,
+                error_code="RetryLimitExceeded",
+                error_message=f"Retry limit exceeded ({self.settings.secure_coding_max_retries})",
+            )
+            raise RuntimeError(f"Retry limit exceeded for {job_id}")
         context = self.store.get_runtime_context(job["context_id"])
         if not context:
             raise HTTPException(status_code=404, detail="Runtime context not found")
+        failed_patch_id = self._failed_patch_id_from_feedback(request.validation_feedback)
+        if failed_patch_id:
+            patch = self.store.get_secure_patch(failed_patch_id)
+            if patch and patch["change_summary_json"].get("workspace_applied"):
+                rolled_back = self.apply_engine.rollback_apply(job_id, failed_patch_id)
+                if not rolled_back:
+                    raise RuntimeError(f"Failed to rollback failed patch before retry: {failed_patch_id}")
         self.store.save_secure_retry_request(
             retry_id=generate_id("retry"),
             job_id=job_id,
@@ -168,6 +186,17 @@ class SecureCodingService:
         )
         self.store.update_secure_job(job_id, status="PENDING", current_step=request.retry_from_step, progress=0)
         return context
+
+    def _failed_patch_id_from_feedback(self, feedback: dict[str, Any]) -> str | None:
+        patch_id = feedback.get("patch_id")
+        if isinstance(patch_id, str) and patch_id:
+            return patch_id
+        phase2 = feedback.get("phase2")
+        if isinstance(phase2, dict):
+            phase2_patch_id = phase2.get("patch_id")
+            if isinstance(phase2_patch_id, str) and phase2_patch_id:
+                return phase2_patch_id
+        return None
 
     def get_job_response(self, job_id: str) -> SecureCodingJobResponse:
         row = self.store.get_secure_job(job_id)

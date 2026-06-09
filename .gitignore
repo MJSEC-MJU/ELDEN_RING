@@ -26,4 +26,5 @@ htmlcov/
 # `make chaos`. Curated copies of the slide PNGs live under
 # docs/figures/phase1-reliability/.
 scripts/loadtest/results/
+/runtime/
 /tmp/make-chaos*.log
