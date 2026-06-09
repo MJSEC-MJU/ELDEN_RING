@@ -177,6 +177,118 @@ class SecureCodingWorkerTests(unittest.TestCase):
         self.assertIsNotNone(job)
         self.assertEqual("COMPLETED", job["status"])
 
+    def test_run_forever_records_bad_queue_payload_and_continues(self) -> None:
+        class StopWorker(Exception):
+            pass
+
+        class FakePubSub:
+            def __init__(self) -> None:
+                self.subscribed: tuple[str, ...] = ()
+                self.closed = False
+
+            def subscribe(self, *channels: str) -> None:
+                self.subscribed = channels
+
+            def get_message(self, timeout: float = 0) -> None:
+                return None
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeRedis:
+            def __init__(self, payloads: list[str]) -> None:
+                self.pubsub_obj = FakePubSub()
+                self.payloads = payloads
+
+            def pubsub(self, ignore_subscribe_messages: bool = True) -> FakePubSub:
+                return self.pubsub_obj
+
+            def brpop(self, queue: str, timeout: int = 0) -> tuple[str, str]:
+                if self.payloads:
+                    return (queue, self.payloads.pop(0))
+                raise StopWorker()
+
+        good_payload = dict(self._context())
+        good_payload["event_id"] = "evt-after-bad-payload"
+        good_payload["context_id"] = "ctx-after-bad-payload"
+        fake = FakeRedis(["{not-json", json.dumps(good_payload)])
+        self.worker._client = fake
+
+        with self.assertLogs("src.secure_coding_plane.worker", level="ERROR") as logs:
+            with self.assertRaises(StopWorker):
+                self.worker.run_forever(sleep_sec=1.0)
+
+        self.assertTrue(any("failed while processing" in entry for entry in logs.output))
+        errors = self.worker.store.list_messages("secure-coding:worker:error")
+        self.assertEqual(1, len(errors))
+        self.assertEqual("JSONDecodeError", errors[0]["payload_json"]["error_type"])
+        self.assertEqual(self.settings.secure_coding_ingest_queue, errors[0]["payload_json"]["source"])
+        job = self.worker.store.get_secure_job_by_event("evt-after-bad-payload")
+        self.assertIsNotNone(job)
+        self.assertEqual("COMPLETED", job["status"])
+
+    def test_run_forever_records_bad_retry_payload_and_continues_to_queue(self) -> None:
+        class StopWorker(Exception):
+            pass
+
+        class FakePubSub:
+            def __init__(self, message: dict) -> None:
+                self.subscribed: tuple[str, ...] = ()
+                self.message = message
+                self.closed = False
+
+            def subscribe(self, *channels: str) -> None:
+                self.subscribed = channels
+
+            def get_message(self, timeout: float = 0) -> dict | None:
+                if self.message:
+                    message = self.message
+                    self.message = {}
+                    return message
+                return None
+
+            def close(self) -> None:
+                self.closed = True
+
+        class FakeRedis:
+            def __init__(self, payload: dict) -> None:
+                self.pubsub_obj = FakePubSub(
+                    {
+                        "channel": "elden:phase2:retry",
+                        "data": json.dumps({"phase2": {"event_id": "missing-event"}}),
+                    }
+                )
+                self.payload = payload
+                self.consumed = False
+
+            def pubsub(self, ignore_subscribe_messages: bool = True) -> FakePubSub:
+                return self.pubsub_obj
+
+            def brpop(self, queue: str, timeout: int = 0) -> tuple[str, str]:
+                if not self.consumed:
+                    self.consumed = True
+                    return (queue, json.dumps(self.payload))
+                raise StopWorker()
+
+        good_payload = dict(self._context())
+        good_payload["event_id"] = "evt-after-bad-retry"
+        good_payload["context_id"] = "ctx-after-bad-retry"
+        fake = FakeRedis(good_payload)
+        self.worker._client = fake
+
+        with self.assertLogs("src.secure_coding_plane.worker", level="ERROR") as logs:
+            with self.assertRaises(StopWorker):
+                self.worker.run_forever(sleep_sec=1.0)
+
+        self.assertTrue(any("failed while processing" in entry for entry in logs.output))
+        errors = self.worker.store.list_messages("secure-coding:worker:error")
+        self.assertEqual(1, len(errors))
+        self.assertEqual("KeyError", errors[0]["payload_json"]["error_type"])
+        self.assertEqual(self.settings.secure_coding_retry_channel, errors[0]["payload_json"]["source"])
+        job = self.worker.store.get_secure_job_by_event("evt-after-bad-retry")
+        self.assertIsNotNone(job)
+        self.assertEqual("COMPLETED", job["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,8 @@ class NormalizedEvent(BaseModel):
     blocked: bool = False
     severity: str  # "CRITICAL", "HIGH", "MEDIUM", "LOW"
     raw_rule_id: Optional[str] = None
+    requires_patch: Optional[bool] = None
+    defense_action_taken: Optional[str] = None
 
 
 class ManualEventRequest(BaseModel):
@@ -31,3 +33,6 @@ class ManualEventRequest(BaseModel):
     payload_sample: str = ""
     source_ip: Optional[str] = None
     severity: str = "MEDIUM"
+    blocked: bool = False
+    requires_patch: Optional[bool] = None
+    defense_action_taken: Optional[str] = None

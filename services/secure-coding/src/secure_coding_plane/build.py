@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shlex
 import subprocess
+import os
 from typing import Any
 
 from .config import PlaneSettings
@@ -32,6 +33,12 @@ class SecureCodingBuildEngine:
                 capture_output=True,
                 text=True,
                 check=False,
+                env={
+                    **os.environ,
+                    "ELDEN_EVENT_ID": context["event_id"],
+                    "ELDEN_PATCH_ID": patch_id,
+                    "ELDEN_CANDIDATE_IMAGE": candidate_image,
+                },
             )
             log_text = "\n".join(
                 [

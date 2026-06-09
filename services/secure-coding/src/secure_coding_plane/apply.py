@@ -62,6 +62,7 @@ class SecureCodingApplyEngine:
                 "workspace_applied": True,
                 "workspace_file": str(workspace_file),
                 "backup_file": str(backup_file),
+                "patched_file_path": patch_row.get("patched_file_path"),
                 "apply_mode": mode,
             }
         )

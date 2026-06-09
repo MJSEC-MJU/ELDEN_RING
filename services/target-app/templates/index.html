@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ELDEN Bank</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --line: #e5e9f2;
+      --text: #111827;
+      --muted: #6b7280;
+      --primary: #1d4ed8;
+      --primary-dark: #1e40af;
+      --danger: #dc2626;
+      --success: #15803d;
+      --shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        linear-gradient(180deg, rgba(29, 78, 216, 0.08), transparent 320px),
+        var(--bg);
+    }
+
+    .page {
+      width: min(1080px, calc(100% - 36px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 48px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      color: #fff;
+      background: var(--primary);
+      font-size: 14px;
+    }
+
+    .nav {
+      display: flex;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .nav a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 420px;
+      gap: 34px;
+      align-items: center;
+    }
+
+    .copy h1 {
+      margin: 0;
+      max-width: 620px;
+      font-size: clamp(42px, 5vw, 64px);
+      line-height: 1.02;
+      letter-spacing: -0.055em;
+    }
+
+    .copy p {
+      max-width: 560px;
+      margin: 20px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.7;
+    }
+
+    .notice {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 8px 12px;
+      border: 1px solid #fecaca;
+      border-radius: 999px;
+      color: #991b1b;
+      background: #fff1f2;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--danger);
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 30px;
+    }
+
+    .step {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .step strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .card {
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+    }
+
+    .card h2 {
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: -0.03em;
+    }
+
+    .sub {
+      margin: 8px 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    label {
+      display: block;
+      margin: 16px 0 8px;
+      color: #374151;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      padding: 14px 15px;
+      border: 1px solid #d8dee9;
+      border-radius: 14px;
+      outline: none;
+      background: #fff;
+      color: var(--text);
+      font-size: 15px;
+    }
+
+    input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(29, 78, 216, 0.10);
+    }
+
+    .buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    button,
+    .button {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 46px;
+      padding: 0 14px;
+      border: 0;
+      border-radius: 14px;
+      color: #fff;
+      background: var(--primary);
+      font-weight: 800;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    button:hover,
+    .button:hover {
+      background: var(--primary-dark);
+    }
+
+    .secondary {
+      border: 1px solid #d8dee9;
+      color: #111827;
+      background: #fff;
+    }
+
+    .secondary:hover {
+      background: #f8fafc;
+    }
+
+    .danger {
+      color: #fff;
+      background: var(--danger);
+    }
+
+    .danger:hover {
+      background: #b91c1c;
+    }
+
+    .result {
+      min-height: 104px;
+      margin-top: 18px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #f8fafc;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .result.ok {
+      border-color: #bbf7d0;
+      color: var(--success);
+      background: #f0fdf4;
+    }
+
+    .result.bad {
+      border-color: #fecaca;
+      color: #991b1b;
+      background: #fff1f2;
+    }
+
+    .attack-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .attack-links .button {
+      min-height: 40px;
+      padding: 0 12px;
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      .hero,
+      .steps {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        align-items: flex-start;
+        gap: 16px;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div class="brand">
+        <div class="mark">ER</div>
+        <span>ELDEN Bank</span>
+      </div>
+      <nav class="nav">
+        <a href="/">개인뱅킹</a>
+        <a href="/api/file?name=sample.txt">고객센터</a>
+        <a id="dashboardLink" href="http://127.0.0.1:8080" target="_blank" rel="noreferrer">보안 대시보드</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div class="copy">
+        <div class="notice"><span class="dot"></span> 데모용 취약 버전</div>
+        <h1>로그인 보안 패치 전후를 한 화면에서 비교합니다.</h1>
+        <p>
+          먼저 공격 시뮬레이션으로 로그인 우회가 가능한 상태를 보여줍니다.
+          이후 대시보드에서 탐지, 패치 생성, 검증, 재배포 흐름을 확인하고 같은 공격이 막히는지 비교합니다.
+        </p>
+
+        <div class="steps">
+          <div class="step">
+            <strong>1. 공격</strong>
+            <span>SQLi 페이로드로 로그인 우회를 시도합니다.</span>
+          </div>
+          <div class="step">
+            <strong>2. 탐지</strong>
+            <span>의심 요청이 Runtime Defense 이벤트로 전달됩니다.</span>
+          </div>
+          <div class="step">
+            <strong>3. 패치</strong>
+            <span>패치 후 같은 요청이 실패하는지 확인합니다.</span>
+          </div>
+        </div>
+      </div>
+
+      <section class="card">
+        <h2>로그인</h2>
+        <p class="sub">정상 계정 또는 공격 페이로드로 로그인 요청을 보냅니다.</p>
+
+        <form id="loginForm">
+          <label for="username">아이디</label>
+          <input id="username" name="username" value="demo" autocomplete="username">
+
+          <label for="password">비밀번호</label>
+          <input id="password" name="password" value="demo1234" autocomplete="current-password">
+
+          <div class="buttons">
+            <button type="submit">로그인</button>
+            <button class="danger" type="button" id="attackButton">공격 시뮬레이션</button>
+          </div>
+        </form>
+
+        <div id="result" class="result">아직 요청 전입니다.</div>
+
+        <div class="attack-links">
+          <a class="button secondary" href="/api/search?q=%3Cscript%3Ealert('xss')%3C/script%3E" target="_blank" rel="noreferrer">XSS 공격</a>
+          <a class="button secondary" href="/api/file?name=../../etc/hostname" target="_blank" rel="noreferrer">Path Traversal 공격</a>
+          <a class="button secondary" id="dashboardButton" href="http://127.0.0.1:8080" target="_blank" rel="noreferrer">대시보드 열기</a>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("loginForm");
+    const result = document.getElementById("result");
+    const username = document.getElementById("username");
+    const password = document.getElementById("password");
+    const attackButton = document.getElementById("attackButton");
+    const dashboardLink = document.getElementById("dashboardLink");
+    const dashboardButton = document.getElementById("dashboardButton");
+    const dashboardUrl = `${window.location.protocol}//${window.location.hostname}:8080`;
+
+    dashboardLink.href = dashboardUrl;
+    dashboardButton.href = dashboardUrl;
+
+    async function submitLogin(label) {
+      const body = new URLSearchParams();
+      body.set("username", username.value);
+      body.set("password", password.value);
+
+      result.className = "result";
+      result.textContent = "요청 중...";
+
+      try {
+        const response = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body,
+        });
+        const payload = await response.json();
+        const success = response.ok && payload.status === "success";
+        result.className = `result ${success ? "ok" : "bad"}`;
+        result.textContent = [
+          `${label}: ${success ? "성공" : "실패"}`,
+          `HTTP ${response.status}`,
+          JSON.stringify(payload, null, 2),
+          label === "공격 시뮬레이션" ? "대시보드에서 새 탐지 이벤트를 확인하세요." : "",
+        ].filter(Boolean).join("\n");
+      } catch (error) {
+        result.className = "result bad";
+        result.textContent = `요청 실패: ${error}`;
+      }
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submitLogin("로그인");
+    });
+
+    attackButton.addEventListener("click", () => {
+      username.value = "admin' OR 1=1 --";
+      password.value = "anything";
+      submitLogin("공격 시뮬레이션");
+    });
+  </script>
+</body>
+</html>
