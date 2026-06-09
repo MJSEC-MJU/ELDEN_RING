@@ -30,6 +30,9 @@ class SecureCodingWorker:
 
     def handle_ingest_payload(self, payload: dict[str, Any]) -> str:
         request = RuntimeContextPackage.model_validate(payload)
+        if not request.metadata.requires_patch:
+            logger.info("skipping context without patch requirement: event_id=%s", request.event_id)
+            return f"skipped:{request.event_id}"
         accepted = self.service.submit_context_sync(request)
         return accepted.job_id
 

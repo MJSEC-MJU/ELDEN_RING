@@ -1,0 +1,55 @@
+{
+  "generated_at": "2026-06-09T15:30:00+09:00",
+  "base_url": "http://34.136.94.175",
+  "monitor_url": "http://34.136.94.175:8080",
+  "target_site_count": 1,
+  "scenario_count": 4,
+  "repeated_trials": 10,
+  "site_success_count": 1,
+  "site_success_rate": 100.0,
+  "certified_scope": {
+    "target_site": "target-app",
+    "scenario": "SQL Injection / CWE-89",
+    "llm_provider": "claude_code",
+    "incident_id": "evt-manual-b48201a7",
+    "secure_coding_job": "sc-job-ccb903672ad3",
+    "patch_id": "patch-ee8776ddf067"
+  },
+  "scenarios": {
+    "valid_login_regression": {
+      "passed": true,
+      "success_rate": 100.0,
+      "latency": {
+        "count": 10,
+        "avg_ms": 394.33,
+        "p95_ms": 488.99
+      }
+    },
+    "sqli_replay_block_internal_monitor": {
+      "passed": true,
+      "success_rate": 100.0,
+      "latency": {
+        "count": 10,
+        "avg_ms": 411.01,
+        "p95_ms": 422.32
+      },
+      "note": "Monitor checks target-app from inside the compose network and confirms patched HTTP replay behavior."
+    },
+    "sqli_replay_not_exploited_public_url": {
+      "passed": true,
+      "success_rate": 100.0,
+      "timeout_or_error_count": 10,
+      "note": "Public URL probes measure whether the exploit succeeds. Timeout/error is not counted as HTTP application blocking."
+    },
+    "xss_probe_current_state": {
+      "passed": false,
+      "status": 200,
+      "note": "Not certified in this metrics snapshot."
+    },
+    "path_traversal_probe_current_state": {
+      "passed": false,
+      "status": 0,
+      "note": "Not certified in this metrics snapshot."
+    }
+  }
+}

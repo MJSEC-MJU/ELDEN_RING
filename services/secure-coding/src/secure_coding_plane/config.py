@@ -21,6 +21,7 @@ class PlaneSettings:
     secure_coding_claude_command: str = "claude"
     secure_coding_claude_model: str | None = None
     secure_coding_llm_timeout_sec: int = 180
+    secure_coding_max_retries: int = 3
     secure_coding_apply_mode: str = "workspace"
     secure_coding_apply_rollback_on_failure: bool = True
     secure_coding_build_mode: str = "simulate"
@@ -51,6 +52,7 @@ def load_settings() -> PlaneSettings:
         secure_coding_claude_command=os.getenv("SECURE_CODING_CLAUDE_COMMAND", "claude"),
         secure_coding_claude_model=os.getenv("SECURE_CODING_CLAUDE_MODEL"),
         secure_coding_llm_timeout_sec=int(os.getenv("SECURE_CODING_LLM_TIMEOUT_SEC", "180")),
+        secure_coding_max_retries=int(os.getenv("SECURE_CODING_MAX_RETRIES", "3")),
         secure_coding_apply_mode=os.getenv("SECURE_CODING_APPLY_MODE", "workspace"),
         secure_coding_apply_rollback_on_failure=os.getenv("SECURE_CODING_APPLY_ROLLBACK_ON_FAILURE", "true").lower() in {"1", "true", "yes", "on"},
         secure_coding_build_mode=os.getenv("SECURE_CODING_BUILD_MODE", "simulate"),

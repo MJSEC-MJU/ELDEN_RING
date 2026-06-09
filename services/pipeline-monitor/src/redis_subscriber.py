@@ -14,6 +14,7 @@ CHANNELS = (
     "elden:phase2:context",
     "elden:phase3:validate",
     "elden:phase4:promote",
+    "elden:phase4:deployed",
     "elden:phase2:retry",
 )
 

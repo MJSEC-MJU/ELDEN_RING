@@ -116,6 +116,8 @@ async def run_pipeline(event: NormalizedEvent) -> dict:
         )
 
         defense_action = await defense_mgr.handle_defense(event)
+        if event.defense_action_taken:
+            defense_action = event.defense_action_taken if not defense_action else f"{event.defense_action_taken}+{defense_action}"
 
         context = build_context(event, cwe, source_map, defense_action, trace_id=trace_id)
         contexts_store.append(context)
@@ -187,8 +189,10 @@ async def receive_manual_event(req: ManualEventRequest):
         target_endpoint=req.target_endpoint,
         payload_sample=req.payload_sample,
         source_ip=req.source_ip,
-        blocked=False,
+        blocked=req.blocked,
         severity=req.severity,
+        requires_patch=req.requires_patch,
+        defense_action_taken=req.defense_action_taken,
     )
     context = await run_pipeline(event)
     return {"status": "processed", "context_id": context["context_id"]}

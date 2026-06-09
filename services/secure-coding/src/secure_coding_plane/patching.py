@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import difflib
+import time
 from pathlib import Path
 from typing import Any
 
@@ -97,9 +99,10 @@ class SecureCodingPatchEngine:
         if patch_row.get("patched_file_path"):
             patched_content = Path(patch_row["patched_file_path"]).read_text(encoding="utf-8")
         syntax_valid = True
-        if patch_row.get("patched_file_path", "").endswith(".py") and patched_content:
+        patched_file_path = patch_row.get("patched_file_path") or ""
+        if patched_file_path.endswith(".py") and patched_content:
             try:
-                compile(patched_content, patch_row["patched_file_path"], "exec")
+                compile(patched_content, patched_file_path, "exec")
             except SyntaxError:
                 syntax_valid = False
         safety_checks_passed = self._patched_content_is_safe(patch_row["unified_diff"], patched_content)
@@ -127,8 +130,7 @@ class SecureCodingPatchEngine:
         original_content = code_context["full_content"]
         if code_context["resolved_path"] is None:
             return patched_snippet
-        line_start = context["target"]["source_mapping"]["line_start"]
-        line_end = context["target"]["source_mapping"]["line_end"]
+        line_start, line_end = self._target_region(context, code_context)
         lines = original_content.splitlines()
         replacement_lines = patched_snippet.splitlines()
         start_idx = max(line_start - 1, 0)
@@ -151,11 +153,20 @@ class SecureCodingPatchEngine:
         prompt = self._build_llm_patch_prompt(context, code_context, strategy)
         prompt_path = self.artifact_root / "llm" / "prompts" / f"{job_id}.txt"
         write_text(prompt_path, prompt)
+        started = time.perf_counter()
+        print(
+            f"[llm] START provider={self.patch_client.provider_name} "
+            f"job={job_id} event={context['event_id']} "
+            f"target={context['target']['source_mapping']['file']}::"
+            f"{context['target']['source_mapping']['function']}",
+            flush=True,
+        )
         response = self.patch_client.generate_patch_json(
             prompt=prompt,
             workdir=self.settings.workspace_root,
             schema=self._llm_patch_schema(),
         )
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
         response_path = self.artifact_root / "llm" / "responses" / f"{job_id}.json"
         write_text(response_path, response.raw_text)
         patched_snippet = response.payload.get("patched_snippet")
@@ -164,12 +175,70 @@ class SecureCodingPatchEngine:
         change_summary = response.payload.get("change_summary") or {}
         if not isinstance(change_summary, dict):
             raise LlmPatchClientError("LLM output did not contain a valid change_summary object")
+        print(
+            f"[llm] DONE provider={response.provider} job={job_id} "
+            f"duration_ms={elapsed_ms} fix={change_summary.get('security_fix', '')}",
+            flush=True,
+        )
         return {
-            "patched_snippet": patched_snippet,
+            "patched_snippet": self._normalize_patched_snippet(context, code_context, patched_snippet),
             "change_summary": change_summary,
             "provider": response.provider,
             "model": response.model,
         }
+
+    def _normalize_patched_snippet(self, context: dict[str, Any], code_context: dict[str, Any], patched_snippet: str) -> str:
+        original_lines = self._target_snippet(context, code_context).splitlines()
+        first_original = next((line.strip() for line in original_lines if line.strip()), "")
+        if not first_original.startswith("def "):
+            return patched_snippet
+
+        function_name = context["target"]["source_mapping"]["function"]
+        function_prefix = f"def {function_name}("
+        patched_lines = patched_snippet.splitlines()
+        for idx, line in enumerate(patched_lines):
+            if line.lstrip().startswith(function_prefix):
+                candidate = "\n".join(patched_lines[idx:]).rstrip() + "\n"
+                return self._extract_single_function(candidate, function_name)
+        return patched_snippet
+
+    def _target_snippet(self, context: dict[str, Any], code_context: dict[str, Any]) -> str:
+        if code_context["resolved_path"] is None:
+            return code_context["snippet"]
+        lines = code_context["full_content"].splitlines()
+        line_start, line_end = self._target_region(context, code_context)
+        start_idx = max(line_start - 1, 0)
+        end_idx = min(line_end, len(lines))
+        return "\n".join(lines[start_idx:end_idx])
+
+    def _target_region(self, context: dict[str, Any], code_context: dict[str, Any]) -> tuple[int, int]:
+        function_name = context["target"]["source_mapping"]["function"]
+        resolved_path = code_context.get("resolved_path")
+        if resolved_path and str(resolved_path).endswith(".py"):
+            try:
+                tree = ast.parse(code_context["full_content"])
+            except SyntaxError:
+                tree = None
+            if tree is not None:
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+                        if node.end_lineno is not None:
+                            return node.lineno, node.end_lineno
+        return (
+            context["target"]["source_mapping"]["line_start"],
+            context["target"]["source_mapping"]["line_end"],
+        )
+
+    def _extract_single_function(self, snippet: str, function_name: str) -> str:
+        try:
+            tree = ast.parse(snippet)
+        except SyntaxError:
+            return snippet
+        lines = snippet.splitlines()
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name and node.end_lineno:
+                return "\n".join(lines[node.lineno - 1 : node.end_lineno]).rstrip() + "\n"
+        return snippet
 
     def _llm_patch_schema(self) -> dict[str, Any]:
         return {
@@ -195,8 +264,10 @@ class SecureCodingPatchEngine:
                 '{"patched_snippet":"<string>","change_summary":{"security_fix":"<string>"}}',
                 "Do not include markdown fences or explanation.",
                 "Rules:",
-                "- Preserve the existing function signature if visible in the snippet.",
-                "- Keep the change minimal and limited to the vulnerable region.",
+                "- Return a complete replacement for exactly the target function shown below.",
+                "- Do not add, remove, or rename helper functions, imports, constants, decorators, routes, or unrelated code.",
+                "- Preserve the existing function signature exactly if visible in the snippet.",
+                "- Keep the change minimal and limited to the target function body.",
                 "- Do not add new third-party dependencies.",
                 "- Preserve existing response schema and unrelated behavior.",
                 f"- CWE: {context['attack_info']['cwe_id']}",
@@ -210,7 +281,7 @@ class SecureCodingPatchEngine:
                 "Constraints:",
                 *[f"- {key}={value}" for key, value in strategy.constraints.items()],
                 "Original vulnerable snippet:",
-                code_context["snippet"],
+                self._target_snippet(context, code_context),
             ]
         )
 

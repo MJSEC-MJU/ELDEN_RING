@@ -1,0 +1,186 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 10
+
+  target-app:
+    image: ghcr.io/mjsec-mju/elden-target-app:real-latest
+    restart: unless-stopped
+    pull_policy: never
+    build:
+      context: ./runtime/live-workspace/services/target-app
+    ports:
+      - "127.0.0.1:15000:5000"
+
+  runtime-defense:
+    build:
+      context: ./services/runtime-defense
+    image: elden-runtime-defense:real
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ROUTE_MAP_PATH: /config/routes.json
+      WEBHOOK_AUTH_TOKEN: ""
+      DEFENSE_APPLY_ENABLED: "false"
+      DRAIN_INTERVAL_SECONDS: "2"
+      REDIS_CONNECT_TIMEOUT: "0.5"
+      REDIS_OP_TIMEOUT: "0.5"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./scripts/loadtest/route-map.json:/config/routes.json:ro
+    ports:
+      - "127.0.0.1:18080:8080"
+
+  secure-coding-api:
+    build:
+      context: ./services/secure-coding
+    image: elden-secure-coding:real
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment: &secure_coding_env
+      PLANE_REDIS_URL: redis://redis:6379/0
+      SECURE_CODING_INGEST_CHANNEL: elden:phase2:context
+      SECURE_CODING_INGEST_QUEUE: elden:phase2:context:queue
+      SECURE_CODING_VALIDATE_CHANNEL: elden:phase3:validate
+      SECURE_CODING_RETRY_CHANNEL: elden:phase2:retry
+      SECURE_CODING_LLM_PROVIDER: claude
+      SECURE_CODING_MAX_RETRIES: "3"
+      SECURE_CODING_APPLY_MODE: workspace
+      SECURE_CODING_BUILD_MODE: command
+      SECURE_CODING_BUILD_IMAGE_TAG: ghcr.io/mjsec-mju/elden-target-app:real-latest
+      SECURE_CODING_BUILD_COMMAND: python /repo/scripts/real_e2e/docker_build_api.py --context /workspace/services/target-app --tag ghcr.io/mjsec-mju/elden-target-app:real-latest
+      PLANE_WORKSPACE_ROOT: /workspace
+      PLANE_ARTIFACT_ROOT: /app/artifacts
+      PLANE_DB_PATH: /app/runtime/secure_coding.db
+      HOME: /root/claude-home
+    volumes:
+      - ./runtime/live-workspace:/workspace
+      - ./runtime/codex-home:/root/.codex
+      - ./runtime/claude-home:/root/claude-home
+      - ./scripts:/repo/scripts:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - secure-coding-runtime:/app/runtime
+      - pipeline-artifacts:/app/artifacts
+    ports:
+      - "127.0.0.1:18082:8080"
+
+  secure-coding-worker:
+    image: elden-secure-coding:real
+    restart: unless-stopped
+    depends_on:
+      secure-coding-api:
+        condition: service_started
+    command: ["python", "-m", "src.worker"]
+    environment: *secure_coding_env
+    volumes:
+      - ./runtime/live-workspace:/workspace
+      - ./runtime/codex-home:/root/.codex
+      - ./runtime/claude-home:/root/claude-home
+      - ./scripts:/repo/scripts:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - secure-coding-runtime:/app/runtime
+      - pipeline-artifacts:/app/artifacts
+
+  recovery-assurance-api:
+    build:
+      context: ./services/recovery-assurance
+    image: elden-recovery-assurance:real
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment: &recovery_env
+      REDIS_URL: redis://redis:6379/0
+      RA_VALIDATE_CHANNEL: elden:phase3:validate
+      RA_PROMOTE_CHANNEL: elden:phase4:promote
+      RA_RETRY_CHANNEL: elden:phase2:retry
+      RA_LLM_PROVIDER: claude
+      RA_DATA_DIR: /app/data
+      RA_ARTIFACT_DIR: /app/artifacts/recovery_assurance
+      HOME: /root/claude-home
+    volumes:
+      - ./runtime/codex-home:/root/.codex
+      - ./runtime/claude-home:/root/claude-home
+      - recovery-data:/app/data
+      - pipeline-artifacts:/app/artifacts
+    ports:
+      - "127.0.0.1:18083:8080"
+
+  recovery-assurance-worker:
+    image: elden-recovery-assurance:real
+    restart: unless-stopped
+    depends_on:
+      recovery-assurance-api:
+        condition: service_started
+    command: ["python", "-m", "worker"]
+    environment: *recovery_env
+    volumes:
+      - ./runtime/codex-home:/root/.codex
+      - ./runtime/claude-home:/root/claude-home
+      - recovery-data:/app/data
+      - pipeline-artifacts:/app/artifacts
+
+  deploy-agent:
+    build:
+      context: ./scripts/real_e2e
+      dockerfile: deploy-agent.Dockerfile
+    image: elden-deploy-agent:real
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PROMOTE_CHANNEL: elden:phase4:promote
+      DEPLOYED_CHANNEL: elden:phase4:deployed
+      ROLLBACK_CHANNEL: elden:demo:rollback
+      COMPOSE_FILE: /repo/docker-compose.real.yml
+      COMPOSE_PROJECT: elden_real
+      REPO_ROOT: /repo
+      TARGET_URL: http://target-app:5000
+    volumes:
+      - ./:/repo
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  pipeline-monitor:
+    build:
+      context: ./services/pipeline-monitor
+    image: elden-pipeline-monitor:real
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      runtime-defense:
+        condition: service_started
+    environment:
+      MONITOR_REDIS_URL: redis://redis:6379/0
+      MONITOR_PHASE1_URL: http://runtime-defense:8080
+      MONITOR_TARGET_URL: http://target-app:5000
+      MONITOR_GOVERNANCE_URL: http://governance-unavailable:8080
+      MONITOR_ROLLBACK_CHANNEL: elden:demo:rollback
+      MONITOR_LLM_PROVIDER: claude
+      HOME: /root/claude-home
+      LOG_LEVEL: INFO
+    user: "0:0"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./runtime/codex-home:/home/mon/.codex
+      - ./runtime/claude-home:/root/claude-home
+
+volumes:
+  secure-coding-runtime:
+  recovery-data:
+  pipeline-artifacts:

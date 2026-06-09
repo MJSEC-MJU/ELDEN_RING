@@ -2,77 +2,91 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8" />
-<title>ELDEN RING — Pipeline Monitor</title>
+<title>ELDEN RING - Pipeline Monitor</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
 <style>
-  body { background: linear-gradient(180deg,#020617 0%,#0f172a 100%); color:#e2e8f0;
+  body { background:linear-gradient(135deg,#f8fafc 0%,#eef6ff 48%,#f7fbff 100%); color:#1e293b;
          font-family:'Pretendard','Inter',system-ui,sans-serif; }
-  .card { background:#1e293b; border:1px solid #334155; border-radius:12px; }
-  .card-title { font-size:11px; letter-spacing:0.12em; color:#94a3b8; text-transform:uppercase; font-weight:700; }
+  .card { background:rgba(255,255,255,0.92); border:1px solid #dbe7f3; border-radius:10px; box-shadow:0 12px 30px rgba(15,23,42,0.06); }
+  .card-title { font-size:13px; letter-spacing:0.08em; color:#64748b; text-transform:uppercase; font-weight:800; }
 
   /* nodes */
-  .pnode { border:2px solid; border-radius:14px; padding:14px 16px; background:linear-gradient(180deg,#1e293b,#0f172a);
-           box-shadow:0 6px 20px rgba(0,0,0,0.55); transition:all 0.25s ease; }
-  .pnode .pnode-title { font-size:18px; font-weight:700; color:#e2e8f0; }
-  .pnode .pnode-tag   { font-size:11px; color:#22d3ee; font-weight:600; letter-spacing:0.08em; }
-  .pnode .pnode-sub   { font-size:11px; color:#94a3b8; margin-top:4px; }
-  .pnode .pnode-state { font-size:11px; margin-top:6px; padding:4px 8px; border-radius:6px; display:inline-block;
-                        background:rgba(100,116,139,0.18); color:#cbd5e1; }
-  .pnode-idle    { border-color:#334155; }
-  .pnode-active  { border-color:#fbbf24; box-shadow:0 0 28px rgba(251,191,36,0.6); transform:scale(1.03); }
-  .pnode-active  .pnode-state { background:rgba(251,191,36,0.2); color:#fde68a; }
-  .pnode-recent  { border-color:#22c55e; box-shadow:0 0 22px rgba(34,197,94,0.45); }
-  .pnode-recent  .pnode-state { background:rgba(34,197,94,0.2); color:#86efac; }
-  .pnode-rejected{ border-color:#ef4444; box-shadow:0 0 22px rgba(239,68,68,0.5); }
-  .pnode-rejected .pnode-state { background:rgba(239,68,68,0.2); color:#fca5a5; }
-  .pulse { animation: pulse 1.2s ease-in-out infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.55} }
+  .pnode { border:1px solid; border-radius:12px; padding:18px 20px; background:linear-gradient(180deg,#ffffff,#f8fbff);
+           box-shadow:0 16px 28px rgba(15,23,42,0.10); transition:border-color 0.2s ease, box-shadow 0.2s ease; min-height:190px; }
+  .pnode .pnode-title { font-size:28px; line-height:1.08; font-weight:800; color:#0f172a; letter-spacing:-0.02em; }
+  .pnode .pnode-tag   { font-size:16px; color:#0284c7; font-weight:800; letter-spacing:0.08em; }
+  .pnode .pnode-sub   { font-size:17px; line-height:1.22; color:#64748b; margin-top:8px; }
+  .pnode .pnode-state { font-size:16px; margin-top:12px; padding:6px 10px; border-radius:6px; display:inline-block;
+                        background:#eef6ff; color:#334155; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pnode-idle    { border-color:#cbd5e1; }
+  .pnode-active  { border-color:#f59e0b; box-shadow:0 0 0 1px rgba(245,158,11,0.28),0 12px 24px rgba(245,158,11,0.12); }
+  .pnode-active  .pnode-state { background:#fff7ed; color:#b45309; }
+  .pnode-recent  { border-color:#22c55e; box-shadow:0 0 0 1px rgba(34,197,94,0.22),0 12px 24px rgba(34,197,94,0.10); }
+  .pnode-recent  .pnode-state { background:#ecfdf5; color:#15803d; }
+  .pnode-blocked { border-color:#38bdf8; box-shadow:0 0 0 1px rgba(56,189,248,0.24),0 12px 24px rgba(56,189,248,0.10); }
+  .pnode-blocked .pnode-state { background:#eff6ff; color:#0369a1; }
+  .pnode-rejected{ border-color:#ef4444; box-shadow:0 0 0 1px rgba(239,68,68,0.22),0 12px 24px rgba(239,68,68,0.10); }
+  .pnode-rejected .pnode-state { background:#fef2f2; color:#b91c1c; }
+  .pulse { animation: nodePulse 1.4s ease-in-out infinite; }
+  @keyframes nodePulse { 0%,100%{box-shadow:0 0 0 1px rgba(245,158,11,0.28),0 12px 24px rgba(245,158,11,0.10)} 50%{box-shadow:0 0 0 5px rgba(245,158,11,0.16),0 12px 24px rgba(245,158,11,0.12)} }
 
   /* edges */
-  .edge   { stroke:#475569; stroke-width:2.5; fill:none; marker-end:url(#arrow); }
-  .edge.flow { stroke:#22d3ee; stroke-dasharray:10 6; animation: dash 0.5s linear infinite; stroke-width:3; marker-end:url(#arrow-flow); }
-  .edge.retry { stroke:#fb923c; stroke-width:2; stroke-dasharray:4 4; }
+  .edge   { stroke:#94a3b8; stroke-width:2.8; fill:none; marker-end:url(#arrow); stroke-linecap:round; stroke-linejoin:round; }
+  .edge.flow { stroke:#0ea5e9; stroke-dasharray:12 8; animation: dash 0.65s linear infinite; stroke-width:3.2; marker-end:url(#arrow-flow); }
+  .edge.retry { stroke:#fb923c; stroke-width:2.4; stroke-dasharray:5 7; opacity:0.95; }
+  .flow-label { display:inline-flex; align-items:center; justify-content:center; width:100%; height:100%;
+                border:1px solid #bae6fd; border-radius:9999px; background:rgba(255,255,255,0.94);
+                color:#0369a1; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                font-size:15px; font-weight:800; box-shadow:0 6px 14px rgba(14,165,233,0.10); }
+  .flow-label.retry-label { border-color:#fed7aa; color:#ea580c; box-shadow:0 6px 14px rgba(251,146,60,0.10); }
+  .broker-card { height:100%; padding:14px 18px; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .broker-label { font-size:16px; color:#64748b; font-weight:800; }
+  .broker-title { font-size:24px; line-height:1.05; font-weight:900; color:#e11d48; margin-top:4px; }
+  .broker-sub { font-size:14px; color:#64748b; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:6px; }
   @keyframes dash { to { stroke-dashoffset:-32; } }
 
   /* badges */
-  .badge { padding:3px 10px; border-radius:9999px; font-size:11px; font-weight:700; letter-spacing:0.04em; }
+  .badge { padding:4px 11px; border-radius:9999px; font-size:13px; font-weight:800; letter-spacing:0.04em; }
   .b-low{background:#16a34a;color:#fff;} .b-medium{background:#ca8a04;color:#fff;} .b-high{background:#dc2626;color:#fff;} .b-critical{background:#7c2d12;color:#fff;}
   .b-passed{background:#16a34a;color:#fff;} .b-failed{background:#dc2626;color:#fff;} .b-pending{background:#64748b;color:#fff;}
 
-  .tab-btn { padding:10px 18px; border-bottom:3px solid transparent; cursor:pointer; font-weight:600; color:#94a3b8; transition:all 0.15s; }
+  .tab-btn { padding:10px 18px; border-bottom:3px solid transparent; cursor:pointer; font-size:15px; font-weight:700; color:#94a3b8; transition:all 0.15s; }
   .tab-btn:hover { color:#e2e8f0; }
   .tab-btn.active { border-color:#22d3ee; color:#22d3ee; }
 
-  pre.json { background:#020617; color:#cbd5e1; padding:10px; border-radius:8px; font-size:11px; max-height:240px; overflow:auto; }
+  pre.json { background:#f8fafc; color:#334155; padding:10px; border-radius:8px; font-size:11px; max-height:240px; overflow:auto; }
   .scroll-y { overflow-y:auto; }
+  .scroll-y::-webkit-scrollbar, .ops-terminal::-webkit-scrollbar { width:8px; height:8px; }
+  .scroll-y::-webkit-scrollbar-track, .ops-terminal::-webkit-scrollbar-track { background:#e2e8f0; }
+  .scroll-y::-webkit-scrollbar-thumb, .ops-terminal::-webkit-scrollbar-thumb { background:#94a3b8; border-radius:9999px; }
 
-  .btn { padding:8px 14px; border-radius:8px; font-weight:600; font-size:13px; transition:all 0.15s; cursor:pointer; }
+  .btn { padding:9px 15px; border-radius:7px; font-weight:750; font-size:14px; transition:all 0.15s; cursor:pointer; }
   .btn-primary { background:#0891b2; color:white; }
   .btn-primary:hover { background:#06b6d4; }
-  .btn-secondary { background:#334155; color:#e2e8f0; }
-  .btn-secondary:hover { background:#475569; }
+  .btn-secondary { background:#e2e8f0; color:#334155; border:1px solid #cbd5e1; }
+  .btn-secondary:hover { background:#cbd5e1; }
   .btn-danger { background:#b91c1c; color:white; }
   .btn-danger:hover { background:#dc2626; }
-  .llm-select { background:#0f172a; border:1px solid #334155; border-radius:8px; color:#e2e8f0; font-size:12px; padding:8px 28px 8px 10px; }
-  .llm-pill { display:inline-flex; align-items:center; gap:6px; border:1px solid #334155; border-radius:9999px; padding:6px 10px; font-size:12px; color:#cbd5e1; background:#0f172a; min-width:128px; justify-content:center; }
+  .llm-select { background:#ffffff; border:1px solid #cbd5e1; border-radius:8px; color:#334155; font-size:14px; padding:9px 30px 9px 11px; }
+  .llm-pill { display:inline-flex; align-items:center; gap:6px; border:1px solid #cbd5e1; border-radius:9999px; padding:7px 11px; font-size:13px; color:#334155; background:#ffffff; min-width:132px; justify-content:center; }
   .llm-dot { width:8px; height:8px; border-radius:9999px; background:#64748b; display:inline-block; }
   .llm-dot.ok { background:#22c55e; }
   .llm-dot.warn { background:#f59e0b; }
   .llm-dot.err { background:#ef4444; }
 
   /* LLM telemetry HUD — proves the codex/claude CLI was *really* invoked */
-  .llm-tele { display:flex; align-items:center; gap:8px; border:1px solid #334155; border-radius:10px;
-              padding:6px 12px; font-size:12px; background:linear-gradient(180deg,#0f172a,#020617);
-              color:#cbd5e1; min-width:240px; }
-  .llm-tele.idle    { border-color:#334155; }
-  .llm-tele.running { border-color:#22d3ee; box-shadow:0 0 14px rgba(34,211,238,0.45); }
+  .llm-tele { display:flex; align-items:center; gap:8px; border:1px solid #cbd5e1; border-radius:8px;
+              padding:7px 12px; font-size:13px; background:#ffffff;
+              color:#334155; min-width:240px; }
+  .llm-tele.idle    { border-color:#cbd5e1; }
+  .llm-tele.running { border-color:#38bdf8; box-shadow:0 0 0 1px rgba(56,189,248,0.22); }
   .llm-tele.success { border-color:#22c55e; }
   .llm-tele.failure { border-color:#ef4444; }
-  .llm-tele .tele-label { font-size:10px; letter-spacing:0.1em; color:#64748b; text-transform:uppercase; font-weight:700; }
-  .llm-tele .tele-meta  { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:#e2e8f0; }
-  .llm-tele .tele-fix   { font-size:11px; color:#86efac; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .llm-tele .tele-label { font-size:11px; letter-spacing:0.1em; color:#64748b; text-transform:uppercase; font-weight:800; }
+  .llm-tele .tele-meta  { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:#334155; }
+  .llm-tele .tele-fix   { font-size:12px; color:#15803d; max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .llm-tele.failure .tele-fix { color:#fca5a5; }
   .live-dot { width:9px; height:9px; border-radius:9999px; display:inline-block; background:#22d3ee;
               box-shadow:0 0 0 0 rgba(34,211,238,0.7); animation: liveBeat 1.1s ease-in-out infinite; }
@@ -81,6 +95,20 @@
     70%  { box-shadow:0 0 0 9px rgba(34,211,238,0);  transform:scale(1.18); }
     100% { box-shadow:0 0 0 0 rgba(34,211,238,0);    transform:scale(1); }
   }
+
+  .ops-terminal { background:#f8fafc; border:1px solid #dbe7f3; border-radius:8px;
+                  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+                  font-size:14px; line-height:1.55; color:#334155; }
+  .ops-terminal .cmd-prompt { color:#0284c7; }
+  .ops-terminal .cmd-ok { color:#15803d; }
+  .ops-terminal .cmd-warn { color:#b45309; }
+  .ops-terminal .cmd-err { color:#b91c1c; }
+  .target-pill { display:inline-flex; align-items:center; justify-content:center; border-radius:9999px;
+                 border:1px solid #cbd5e1; padding:5px 10px; font-size:13px; font-weight:900;
+                 letter-spacing:0.06em; text-transform:uppercase; color:#334155; background:#ffffff; }
+  .target-pill.vulnerable { border-color:#ef4444; color:#b91c1c; background:#fef2f2; }
+  .target-pill.patched { border-color:#22c55e; color:#15803d; background:#ecfdf5; }
+  .target-pill.unknown { border-color:#f59e0b; color:#b45309; background:#fff7ed; }
 
   /* REAL LLM stamp visible on Phase 2 node + modal */
   .real-llm-stamp { display:inline-flex; align-items:center; gap:6px; border:1px solid #22c55e;
@@ -93,22 +121,82 @@
                    padding:2px 8px; font-size:10px; font-weight:700; letter-spacing:0.08em;
                    text-transform:uppercase; }
 
-  .stat-card { background:#1e293b; border:1px solid #334155; border-radius:12px; padding:18px; }
+  .stat-card { background:#ffffff; border:1px solid #dbe7f3; border-radius:12px; padding:18px; box-shadow:0 12px 30px rgba(15,23,42,0.06); }
   .stat-num  { font-size:36px; font-weight:800; line-height:1; }
   .stat-label{ font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.1em; font-weight:700; margin-bottom:6px; }
   .cwe-row { cursor:pointer; transition:background 0.15s ease; }
   .cwe-row:hover, .cwe-row.active { background:rgba(34,211,238,0.1); }
 
-  .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px;
+  .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:22px;
                  color:#64748b; text-align:center; }
-  .empty-icon { font-size:48px; opacity:0.4; margin-bottom:12px; }
+  .empty-icon { font-size:42px; opacity:0.4; margin-bottom:10px; }
+  .event-new { position:relative; border-radius:8px; background:rgba(34,211,238,0.10);
+               box-shadow:0 0 0 1px rgba(34,211,238,0.24), 0 0 22px rgba(34,211,238,0.12);
+               animation:newEventGlow 2.8s ease-out; }
+  .incident-new { background:rgba(34,211,238,0.10) !important;
+                  box-shadow:inset 3px 0 0 #22d3ee; animation:newEventGlow 2.8s ease-out; }
+  .new-badge { display:inline-flex; align-items:center; margin-left:6px; padding:1px 6px;
+               border-radius:9999px; background:#22d3ee; color:#082f49; font-size:9px;
+               font-weight:900; letter-spacing:0.08em; }
+  @keyframes newEventGlow {
+    0% { transform:translateY(-2px); background:rgba(34,211,238,0.24); }
+    100% { transform:translateY(0); }
+  }
+
+  .pipeline-layout { height:100%; min-height:0; display:grid; grid-template-columns:minmax(860px,1.72fr) minmax(400px,0.78fr);
+                     gap:12px; padding:12px; overflow:hidden; }
+  .flow-card { min-height:0; overflow:hidden; padding:22px; display:flex; flex-direction:column; }
+  .flow-stage { flex:1 1 auto; min-height:0; position:relative; }
+  #flow-svg { width:100%; height:100%; min-height:560px; }
+  .pipeline-side { min-height:0; overflow:hidden; padding:14px; display:flex; flex-direction:column; gap:8px; }
+  .pipeline-event-log { flex:0 1 12%; min-height:52px; max-height:14%; overflow-y:auto; }
+  #event-empty { flex:0 0 106px; min-height:106px; padding:8px; }
+  #event-empty .empty-icon { font-size:30px; margin-bottom:4px; }
+  #event-empty .font-semibold { font-size:17px; }
+  #event-empty .text-xs { font-size:13px; }
+  .target-panel { flex:0 0 auto; border-top:1px solid #dbe7f3; padding-top:8px; }
+  #target-url { font-size:13px !important; }
+  .target-terminal { height:124px; overflow:auto; }
+  .console-panel { flex:1 1 230px; min-height:225px; border-top:1px solid #dbe7f3; padding-top:8px; display:flex; flex-direction:column; }
+  .console-provider-pill { display:inline-flex; align-items:center; border:1px solid #bae6fd; border-radius:9999px;
+                           padding:4px 9px; color:#0369a1; background:#f0f9ff;
+                           font-size:12px; font-weight:900; letter-spacing:0.05em; text-transform:uppercase; }
+  .text-slate-400 { color:#64748b !important; }
+  .text-slate-500 { color:#64748b !important; }
+  .text-white { color:#0f172a !important; }
+  .text-cyan-300 { color:#0369a1 !important; }
+  .text-rose-400 { color:#e11d48 !important; }
+  .border-slate-700 { border-color:#dbe7f3 !important; }
+  .bg-slate-900\/60, .bg-slate-900\/30, .bg-slate-800 { background:rgba(255,255,255,0.86) !important; }
+  .command-terminal { flex:1 1 auto; min-height:190px; height:auto !important; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  @media (max-width:1280px) {
+    .pipeline-layout { grid-template-columns:minmax(0,1fr); overflow:auto; }
+    .flow-card { min-height:560px; }
+    .pipeline-side { min-height:720px; }
+  }
+  @media (max-width:1500px) {
+    header { padding-left:18px !important; padding-right:18px !important; }
+    nav { padding-left:18px !important; padding-right:18px !important; }
+    nav .btn { padding:8px 10px; font-size:13px; }
+    nav .nav-label { display:none; }
+    nav .llm-select { padding:8px 24px 8px 9px; font-size:13px; }
+    nav .llm-pill { min-width:112px; padding:7px 9px; }
+    .llm-tele { min-width:180px; }
+  }
+  @media (max-height:820px) {
+    #event-empty { flex-basis:78px; min-height:78px; }
+    #event-empty .empty-icon { display:none; }
+    .target-terminal { height:104px; }
+    .console-panel { min-height:190px; }
+    .command-terminal { min-height:165px; }
+  }
 </style>
 </head>
 <body class="h-screen flex flex-col">
 
 <header class="px-6 py-3 border-b border-slate-700 flex items-center justify-between bg-slate-900/60 backdrop-blur">
   <div class="flex items-center gap-4">
-    <div class="text-2xl font-bold text-cyan-400">⚔ ELDEN RING</div>
+    <div class="text-2xl font-bold text-cyan-300">ELDEN RING</div>
     <div class="text-slate-400 text-sm">Pipeline Monitor</div>
     <div class="text-slate-500 text-xs hidden md:block">| 4-Phase 자동 방어 파이프라인</div>
   </div>
@@ -133,57 +221,53 @@
     <div class="tab-btn" data-tab="stats">Stats</div>
   </div>
   <div class="flex items-center gap-2 py-2 flex-wrap justify-end">
-    <span class="text-xs text-slate-500">LLM OAuth:</span>
+    <span class="nav-label text-xs text-slate-500">LLM OAuth:</span>
     <select id="llm-provider" class="llm-select" onchange="refreshLlmStatus()">
       <option value="claude">Claude</option>
       <option value="codex">Codex</option>
     </select>
     <span id="llm-status" class="llm-pill"><span class="llm-dot"></span><span>checking</span></span>
-    <button class="btn btn-primary" onclick="startLlmLogin()">OAuth Login</button>
-    <button class="btn btn-secondary" onclick="runLlmSimulation()">LLM Smoke</button>
-    <span class="text-xs text-slate-500 ml-2">시연용 attack 주입:</span>
-    <button class="btn btn-danger" onclick="inject('sqli')">⚔ SQL Injection</button>
+    <button id="llm-login-btn" class="btn btn-primary" onclick="startLlmLogin()">Claude OAuth</button>
+    <button id="llm-smoke-btn" class="btn btn-secondary" onclick="runLlmSimulation()">Claude Smoke</button>
+    <span class="nav-label text-xs text-slate-500 ml-2">Attack injection:</span>
+    <button class="btn btn-danger" onclick="inject('sqli')">SQL Injection</button>
     <button class="btn btn-secondary" onclick="inject('xss')">XSS</button>
     <button class="btn btn-secondary" onclick="inject('path')">Path Traversal</button>
+    <span class="nav-label text-xs text-slate-500 ml-2">Demo:</span>
+    <button class="btn btn-secondary" onclick="rollbackDemo()">Rollback Vulnerable</button>
   </div>
 </nav>
 
-<main class="flex-1 overflow-hidden">
+<main class="flex-1 min-h-0 overflow-hidden">
 
   <!-- TAB 1: PIPELINE -->
-  <section id="tab-pipeline" class="h-full grid grid-cols-12 gap-4 p-4">
-    <div class="col-span-8 card p-5 relative flex flex-col">
+  <section id="tab-pipeline" class="pipeline-layout">
+    <div class="flow-card card">
       <div class="flex items-center justify-between mb-3">
         <div class="card-title">Live Flow</div>
-        <div class="text-xs text-slate-500">메시지가 채널을 통과할 때 노드와 엣지가 실시간으로 반응합니다</div>
+        <div class="text-xs text-slate-500">Runtime signal -> LLM patch -> validation -> deploy</div>
       </div>
-      <div class="flex-1 relative">
-        <svg id="flow-svg" viewBox="0 0 1100 540" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+      <div class="flow-stage">
+        <svg id="flow-svg" viewBox="0 0 1260 540" preserveAspectRatio="xMidYMid meet">
           <defs>
-            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
             </marker>
-            <marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#22d3ee"/>
+            <marker id="arrow-flow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#0ea5e9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
             </marker>
           </defs>
 
           <!-- edges -->
-          <path id="e12" class="edge" d="M 270 130 C 380 130 380 130 480 130" />
-          <path id="e23" class="edge" d="M 700 130 C 810 130 810 130 920 130" />
-          <path id="e34" class="edge" d="M 1015 175 C 1015 285 1015 285 1015 360" />
-          <path id="e2r" class="edge retry" d="M 590 175 C 590 280 270 280 270 175" />
-
-          <!-- channel labels -->
-          <text x="375" y="118" class="text-[12px] font-mono" fill="#22d3ee">elden:phase2:context</text>
-          <text x="800" y="118" class="text-[12px] font-mono" fill="#22d3ee">elden:phase3:validate</text>
-          <text x="1025" y="270" class="text-[12px] font-mono" fill="#22d3ee">elden:phase4:promote</text>
-          <text x="380" y="295" class="text-[12px] font-mono" fill="#fb923c">elden:phase2:retry (실패 시)</text>
+          <path id="e12" class="edge" d="M 308 172 C 328 172 338 172 358 172" />
+          <path id="e23" class="edge" d="M 628 172 C 648 172 658 172 678 172" />
+          <path id="e34" class="edge" d="M 948 172 C 952 172 956 172 960 172" />
+          <path id="e2r" class="edge retry" d="M 816 286 C 816 350 510 350 510 268" />
 
           <!-- nodes -->
-          <foreignObject x="60" y="60" width="220" height="130">
+          <foreignObject x="30" y="62" width="278" height="224">
             <div xmlns="http://www.w3.org/1999/xhtml" id="node-p1" class="pnode pnode-idle">
-              <div class="pnode-tag">⚔ PHASE 1</div>
+              <div class="pnode-tag">PHASE 1</div>
               <div class="pnode-title">Runtime Defense</div>
               <div class="pnode-sub">Falco + ModSecurity WAF</div>
               <div class="pnode-sub mt-1 font-mono">elden-production</div>
@@ -191,10 +275,10 @@
             </div>
           </foreignObject>
 
-          <foreignObject x="480" y="60" width="220" height="150">
+          <foreignObject x="358" y="62" width="270" height="224">
             <div xmlns="http://www.w3.org/1999/xhtml" id="node-p2" class="pnode pnode-idle">
               <div class="flex items-center justify-between">
-                <div class="pnode-tag">🔧 PHASE 2</div>
+                <div class="pnode-tag">PHASE 2</div>
                 <span id="p2-real-stamp" class="real-llm-stamp" style="display:none">REAL LLM</span>
               </div>
               <div class="pnode-title">Secure Coding</div>
@@ -204,9 +288,9 @@
             </div>
           </foreignObject>
 
-          <foreignObject x="900" y="60" width="220" height="130">
+          <foreignObject x="678" y="62" width="270" height="224">
             <div xmlns="http://www.w3.org/1999/xhtml" id="node-p3" class="pnode pnode-idle">
-              <div class="pnode-tag">🛡 PHASE 3</div>
+              <div class="pnode-tag">PHASE 3</div>
               <div class="pnode-title">Recovery Assurance</div>
               <div class="pnode-sub">exploit / regression / SLO</div>
               <div class="pnode-sub mt-1 font-mono">elden-staging</div>
@@ -214,9 +298,9 @@
             </div>
           </foreignObject>
 
-          <foreignObject x="900" y="360" width="220" height="140">
+          <foreignObject x="960" y="62" width="270" height="224">
             <div xmlns="http://www.w3.org/1999/xhtml" id="node-p4" class="pnode pnode-idle">
-              <div class="pnode-tag">⚖ PHASE 4</div>
+              <div class="pnode-tag">PHASE 4</div>
               <div class="pnode-title">Governance</div>
               <div class="pnode-sub">Kyverno · ArgoCD · Rollouts</div>
               <div class="pnode-sub mt-1 font-mono">elden-governance</div>
@@ -225,27 +309,65 @@
           </foreignObject>
 
           <!-- redis broker icon -->
-          <foreignObject x="430" y="430" width="240" height="80">
-            <div xmlns="http://www.w3.org/1999/xhtml" class="card p-3 text-center">
-              <div class="text-xs text-slate-400">Message Broker</div>
-              <div class="font-bold text-rose-400">Redis Pub/Sub + List</div>
-              <div class="text-[10px] text-slate-500 font-mono">redis-master.elden-monitoring:6379</div>
+          <foreignObject x="455" y="398" width="370" height="118">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="card broker-card text-center">
+              <div class="broker-label">Message Broker</div>
+              <div class="broker-title">Redis Pub/Sub + List</div>
+              <div class="broker-sub">redis-master.elden-monitoring:6379</div>
             </div>
+          </foreignObject>
+
+          <!-- channel labels are drawn last so cards never cover them -->
+          <foreignObject x="285" y="26" width="130" height="34">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="flow-label">context</div>
+          </foreignObject>
+          <foreignObject x="605" y="26" width="130" height="34">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="flow-label">validate</div>
+          </foreignObject>
+          <foreignObject x="915" y="26" width="130" height="34">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="flow-label">promote</div>
+          </foreignObject>
+          <foreignObject x="565" y="358" width="128" height="34">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="flow-label retry-label">retry</div>
           </foreignObject>
         </svg>
       </div>
     </div>
 
-    <aside class="col-span-4 card p-5 flex flex-col">
+    <aside class="pipeline-side card">
       <div class="flex items-center justify-between mb-3">
         <div class="card-title">Live Events</div>
         <div id="ev-count" class="text-xs text-slate-500">0 events</div>
       </div>
-      <div id="event-log" class="flex-1 scroll-y space-y-2 text-sm pr-1"></div>
+      <div id="event-log" class="pipeline-event-log scroll-y space-y-2 text-sm pr-1"></div>
       <div id="event-empty" class="empty-state hidden">
         <div class="empty-icon">📡</div>
         <div class="font-semibold mb-1">아직 이벤트가 없습니다</div>
         <div class="text-xs">상단의 attack 버튼을 눌러보세요</div>
+      </div>
+      <div class="target-panel space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <div class="card-title">Target Site</div>
+            <div id="target-url" class="text-[11px] text-slate-500 font-mono mt-1">checking...</div>
+          </div>
+          <span id="target-state" class="target-pill unknown">unknown</span>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button class="btn btn-secondary" onclick="runTargetProbe('valid')">Valid Login</button>
+          <button class="btn btn-danger" onclick="runTargetProbe('sqli')">SQLi Replay</button>
+        </div>
+        <div id="target-output" class="ops-terminal target-terminal p-3"></div>
+      </div>
+      <div class="console-panel">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <div id="cmd-title" class="card-title">LLM Activity Console</div>
+            <span id="cmd-provider" class="console-provider-pill">Claude</span>
+          </div>
+          <div id="cmd-count" class="text-xs text-slate-500">0 lines</div>
+        </div>
+        <div id="codex-console" class="ops-terminal command-terminal p-3"></div>
       </div>
     </aside>
   </section>
@@ -421,6 +543,138 @@
 const Q = (s)=>document.querySelector(s);
 const QA= (s)=>document.querySelectorAll(s);
 const STATE = { incidents:[], events:[], stats:{}, selectedCwe:null };
+const CMD = { lines: [] };
+const NEW = { events:new Set(), incidents:new Set() };
+
+function appendCommandLine(text, kind='info', render=true) {
+  CMD.lines.push({ text, kind, ts: Date.now() });
+  if (CMD.lines.length > 120) CMD.lines.shift();
+  if (render) renderCommandConsole();
+}
+
+function commandForEvent(ev) {
+  const id = ev.incident_id || 'unknown';
+  const summary = ev.summary || '';
+  const meta = ev.meta || {};
+  const provider = meta.llm_provider || selectedLlmProvider();
+  const providerName = provider === 'claude' || provider === 'claude_code' ? 'claude-code' : provider;
+  const shortId = id.replace(/^evt-manual-/, 'evt-');
+  if (ev.channel === 'elden:phase2:context') {
+    if (meta.blocked || meta.requires_patch === false) {
+      return { kind:'ok', text:`[runtime-defense] blocked ${shortId}  patch skipped (${meta.defense_action_taken || 'application_rejected'})` };
+    }
+    return { kind:'info', text:`[redis] phase2:context ${shortId}  ${summary}` };
+  }
+  if (ev.channel === 'elden:phase3:validate') {
+    return { kind:'ok', text:`$ ${providerName} secure-coding --patch ${meta.patch_id || shortId}` };
+  }
+  if (ev.channel === 'elden:phase4:promote') {
+    return { kind:'ok', text:`$ ${providerName} recovery-assurance --verdict ${meta.patch_id || shortId}` };
+  }
+  if (ev.channel === 'elden:phase4:deployed') {
+    return { kind:'ok', text:`$ docker compose up -d target-app  replay=${meta.sqli_replay || '-'}` };
+  }
+  if (ev.channel === 'elden:phase2:retry') {
+    return { kind:'warn', text:`$ ${providerName} secure-coding --retry ${shortId}  ${summary}` };
+  }
+  return { kind:'info', text:`[redis] ${ev.channel || 'event'} ${shortId}` };
+}
+
+function appendCommandFromEvent(ev, render=true) {
+  if (!ev) return;
+  const cmd = commandForEvent(ev);
+  appendCommandLine(cmd.text, cmd.kind, render);
+}
+
+function rebuildCommandConsole() {
+  CMD.lines = [];
+  STATE.events.slice().reverse().forEach(ev => appendCommandFromEvent(ev, false));
+  renderCommandConsole();
+}
+
+function renderCommandConsole() {
+  const el = Q('#codex-console');
+  const count = Q('#cmd-count');
+  updateCommandConsoleProvider();
+  if (!el) return;
+  if (count) count.textContent = `${CMD.lines.length} lines`;
+  if (CMD.lines.length === 0) {
+    el.innerHTML = `<div class="text-slate-500">waiting for pipeline events...</div>`;
+    return;
+  }
+  el.innerHTML = CMD.lines.map(line => {
+    const cls = line.kind === 'ok' ? 'cmd-ok' : line.kind === 'warn' ? 'cmd-warn' : line.kind === 'err' ? 'cmd-err' : 'cmd-prompt';
+    return `<div class="${cls} whitespace-pre-wrap">${escapeHtml(line.text)}</div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderTargetStatus(data, mode='status') {
+  const stateEl = Q('#target-state');
+  const urlEl = Q('#target-url');
+  const outEl = Q('#target-output');
+  if (!stateEl || !urlEl || !outEl) return;
+  const state = data && data.state ? data.state : 'unknown';
+  stateEl.className = `target-pill ${state}`;
+  stateEl.textContent = state;
+  urlEl.textContent = data && data.target_url ? data.target_url : 'target-app unavailable';
+  if (data && data.error) {
+    outEl.innerHTML = `<div class="cmd-err">target check failed: ${escapeHtml(data.error)}</div>`;
+    return;
+  }
+  const ready = data && data.ready ? data.ready.status_code : '-';
+  const valid = data && data.valid_login ? data.valid_login.status_code : '-';
+  const replay = data && data.sqli_replay ? data.sqli_replay.status_code : '-';
+  const replayStatus = data && data.sqli_replay && data.sqli_replay.body ? data.sqli_replay.body.status : '-';
+  outEl.innerHTML = [
+    `<div class="cmd-prompt">$ curl ${escapeHtml((data && data.target_url) || 'target-app')}/readyz</div>`,
+    `<div class="cmd-ok">readyz -> HTTP ${ready}</div>`,
+    `<div class="cmd-prompt">$ post /api/login demo:demo1234</div>`,
+    `<div class="cmd-ok">valid_login -> HTTP ${valid}</div>`,
+    `<div class="cmd-prompt">$ post /api/login "admin' OR 1=1 -- "</div>`,
+    `<div class="${state === 'vulnerable' ? 'cmd-err' : 'cmd-ok'}">sqli_replay -> HTTP ${replay} status=${escapeHtml(replayStatus)}</div>`,
+  ].join('');
+}
+
+async function refreshTargetStatus() {
+  try {
+    const r = await fetch('/api/target/status');
+    const d = await r.json();
+    renderTargetStatus(d);
+  } catch (e) {
+    renderTargetStatus({ state:'unknown', error:String(e) });
+  }
+}
+
+async function runTargetProbe(kind) {
+  const probe = kind === 'sqli'
+    ? { username:"admin' OR 1=1 -- ", password:'irrelevant' }
+    : { username:'demo', password:'demo1234' };
+  const outEl = Q('#target-output');
+  if (outEl) outEl.innerHTML = `<div class="cmd-prompt">$ post /api/login ${escapeHtml(probe.username)}</div><div>running...</div>`;
+  try {
+    const r = await fetch('/api/target/login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(probe),
+    });
+    const d = await r.json();
+    const result = d.result || {};
+    const body = result.body || {};
+    const okClass = result.status_code === 200 ? 'cmd-ok' : (result.status_code === 401 ? 'cmd-warn' : 'cmd-err');
+    if (outEl) {
+      outEl.innerHTML = [
+        `<div class="cmd-prompt">$ post /api/login ${escapeHtml(probe.username)}</div>`,
+        `<div class="${okClass}">HTTP ${result.status_code || '-'} in ${result.elapsed_ms || '-'}ms</div>`,
+        `<div>${escapeHtml(JSON.stringify(body))}</div>`,
+      ].join('');
+    }
+    await refreshTargetStatus();
+  } catch (e) {
+    if (outEl) outEl.innerHTML = `<div class="cmd-err">probe failed: ${escapeHtml(String(e))}</div>`;
+  }
+}
+window.runTargetProbe = runTargetProbe;
 
 // ---- toast ----
 function toast(msg, kind='info') {
@@ -489,6 +743,19 @@ function selectedLlmProvider() {
   return Q('#llm-provider').value || 'claude';
 }
 
+function updateCommandConsoleProvider() {
+  const provider = selectedLlmProvider();
+  const label = providerLabel(provider);
+  const title = Q('#cmd-title');
+  const pill = Q('#cmd-provider');
+  const loginBtn = Q('#llm-login-btn');
+  const smokeBtn = Q('#llm-smoke-btn');
+  if (title) title.textContent = `${label} Activity Console`;
+  if (pill) pill.textContent = provider === 'claude' ? 'Claude Code' : label;
+  if (loginBtn) loginBtn.textContent = `${label} OAuth`;
+  if (smokeBtn) smokeBtn.textContent = `${label} Smoke`;
+}
+
 // Initialize the dropdown from the backend's active provider. Do not silently
 // switch to a different authenticated provider; that makes the OAuth pill lie
 // about the provider the smoke test will actually use.
@@ -519,6 +786,7 @@ function currentProviderStatus() {
 }
 
 async function refreshLlmStatus() {
+  updateCommandConsoleProvider();
   setLlmStatus('', 'checking');
   try {
     const r = await fetch('/api/llm/status');
@@ -741,7 +1009,9 @@ async function pollLlmLogin(sessionId) {
 
 async function runLlmSimulation() {
   const provider = selectedLlmProvider();
+  const providerName = provider === 'claude' ? 'claude-code' : provider;
   toast(`${provider} LLM patch smoke running...`);
+  appendCommandLine(`$ ${providerName} secure-coding --smoke --real-cli`, 'info');
   setNode('p2','active','LLM patching...');
   try {
     const r = await fetch(`/api/llm/simulate?provider=${provider}`, {method:'POST'});
@@ -781,6 +1051,29 @@ async function inject(scenario) {
 }
 window.inject = inject;
 
+async function rollbackDemo() {
+  toast('취약한 베이스라인으로 롤백 요청 중...');
+  appendCommandLine('$ demo rollback --to vulnerable-baseline', 'warn');
+  try {
+    const r = await fetch('/api/rollback', {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'sent') {
+      toast('✓ Rollback 요청 완료 — target-app 재빌드 중', 'success');
+      setNode('p1','active','rollback: rebuilding vulnerable app');
+      setNode('p2','idle','waiting for new attack');
+      setNode('p3','idle','idle');
+      setNode('p4','active','rollback deploy…');
+      setTimeout(refreshTargetStatus, 3500);
+      setTimeout(refreshTargetStatus, 9000);
+    } else {
+      toast(`Rollback 실패: ${d.error||'unknown'}`, 'error');
+    }
+  } catch (e) {
+    toast(`Rollback 실패: ${e.message}`, 'error');
+  }
+}
+window.rollbackDemo = rollbackDemo;
+
 // ---- tab switching ----
 QA('.tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
   QA('.tab-btn').forEach(b=>b.classList.toggle('active', b===btn));
@@ -794,7 +1087,7 @@ QA('.tab-btn').forEach(btn=>btn.addEventListener('click', ()=>{
 // ---- node helpers ----
 function setNode(id, status, summary) {
   const el = document.getElementById(`node-${id}`);
-  el.classList.remove('pnode-idle','pnode-active','pnode-recent','pnode-rejected','pulse');
+  el.classList.remove('pnode-idle','pnode-active','pnode-recent','pnode-blocked','pnode-rejected','pulse');
   el.classList.add(`pnode-${status}`);
   if (status==='active') el.classList.add('pulse');
   document.getElementById(`ev-${id}`).textContent = summary || status;
@@ -806,10 +1099,18 @@ function flowEdge(id) {
   setTimeout(()=>e.classList.remove('flow'), 1800);
 }
 
-function react(channel, summary) {
-  if (channel==='elden:phase2:context')   { setNode('p1','recent',summary); flowEdge('e12'); setNode('p2','active','processing…'); }
+function react(channel, summary, meta={}) {
+  if (channel==='elden:phase2:context') {
+    if (meta.blocked || meta.requires_patch === false) {
+      setNode('p1','blocked',summary || 'blocked');
+      setNode('p2','idle','skipped: already blocked');
+      return;
+    }
+    setNode('p1','recent',summary); flowEdge('e12'); setNode('p2','active','LLM patching…');
+  }
   else if (channel==='elden:phase3:validate'){ setNode('p2','recent',summary); flowEdge('e23'); setNode('p3','active','processing…'); }
   else if (channel==='elden:phase4:promote') { setNode('p3','recent',summary); flowEdge('e34'); setNode('p4','active','governance…'); setTimeout(()=>setNode('p4','recent',summary),1800); }
+  else if (channel==='elden:phase4:deployed') { setNode('p4','recent',summary); }
   else if (channel==='elden:phase2:retry')   { setNode('p4','rejected',summary); flowEdge('e2r'); }
 }
 
@@ -822,10 +1123,16 @@ function refreshEventLog() {
   empty.classList.add('hidden');
   log.innerHTML = STATE.events.slice(0, 60).map(ev => {
     const t = new Date(ev.ts*1000).toLocaleTimeString();
-    const phaseTag = ({'elden:phase2:context':'P1→P2','elden:phase3:validate':'P2→P3','elden:phase4:promote':'P3→P4','elden:phase2:retry':'retry'})[ev.channel] || ev.channel;
+    const meta = ev.meta || {};
+    const isBlocked = meta.blocked || meta.requires_patch === false;
+    const phaseTag = isBlocked ? 'blocked' : ({'elden:phase2:context':'P1→P2','elden:phase3:validate':'P2→P3','elden:phase4:promote':'P3→P4','elden:phase4:deployed':'deploy','elden:phase2:retry':'retry'})[ev.channel] || ev.channel;
     const isRetry = ev.channel === 'elden:phase2:retry';
-    return `<div class="border-l-2 ${isRetry?'border-orange-500':'border-cyan-500'} pl-3 py-1">
-      <div class="text-[11px] text-slate-500">${t} <span class="${isRetry?'text-orange-400':'text-cyan-400'} font-semibold">${phaseTag}</span></div>
+    const eventKey = `${ev.channel}|${ev.incident_id || ''}|${ev.ts}`;
+    const isNew = NEW.events.has(eventKey);
+    const border = isBlocked ? 'border-sky-400' : isRetry ? 'border-orange-500' : 'border-cyan-500';
+    const tagColor = isBlocked ? 'text-sky-300' : isRetry ? 'text-orange-400' : 'text-cyan-400';
+    return `<div class="border-l-2 ${border} ${isNew?'event-new':''} pl-3 py-2 pr-2 mb-1">
+      <div class="text-[11px] text-slate-500">${t} <span class="${tagColor} font-semibold">${phaseTag}</span>${isNew?'<span class="new-badge">NEW</span>':''}</div>
       <div class="text-[12px]"><span class="font-mono text-[11px] text-slate-400">${ev.incident_id||'—'}</span> <span class="text-slate-200">${ev.summary||''}</span></div>
     </div>`;
   }).join('');
@@ -834,8 +1141,12 @@ function refreshEventLog() {
 function appendEvent(ev) {
   STATE.events.unshift(ev);
   if (STATE.events.length > 200) STATE.events.pop();
+  const eventKey = `${ev.channel}|${ev.incident_id || ''}|${ev.ts}`;
+  NEW.events.add(eventKey);
+  setTimeout(()=>{ NEW.events.delete(eventKey); refreshEventLog(); }, 5000);
   Q('#hdr-events').textContent = STATE.events.length;
   refreshEventLog();
+  appendCommandFromEvent(ev);
 }
 
 // ---- incidents ----
@@ -843,8 +1154,15 @@ function badge(v) { if (!v) return '<span class="text-slate-500">—</span>'; re
 
 function upsertIncident(inc) {
   const idx = STATE.incidents.findIndex(i=>i.incident_id===inc.incident_id);
-  if (idx===-1) STATE.incidents.unshift(inc);
-  else STATE.incidents[idx] = {...STATE.incidents[idx], ...inc};
+  if (idx===-1) {
+    STATE.incidents.unshift(inc);
+    NEW.incidents.add(inc.incident_id);
+    setTimeout(()=>{ NEW.incidents.delete(inc.incident_id); renderIncidentTable(); }, 5000);
+  } else {
+    STATE.incidents[idx] = {...STATE.incidents[idx], ...inc};
+    NEW.incidents.add(inc.incident_id);
+    setTimeout(()=>{ NEW.incidents.delete(inc.incident_id); renderIncidentTable(); }, 5000);
+  }
   Q('#hdr-incidents').textContent = STATE.incidents.length;
   renderIncidentTable();
 }
@@ -859,12 +1177,16 @@ function renderIncidentTable() {
   empty.classList.add('hidden');
   const rows = STATE.incidents.map(i=>{
     const t = new Date(i.started_at*1000).toLocaleTimeString();
-    return `<tr class="hover:bg-slate-700/40 cursor-pointer border-b border-slate-800/60" onclick="openModal('${i.incident_id}')">
-      <td class="py-3 px-3 font-mono text-xs">${i.incident_id}</td>
+    const isNew = NEW.incidents.has(i.incident_id);
+    const isBlocked = i.stage === 'blocked' || ((i.phase1 || {}).attack_info || {}).blocked || ((i.phase1 || {}).metadata || {}).requires_patch === false;
+    const stageClass = isBlocked ? 'text-sky-300' : i.stage === 'rejected' ? 'text-red-300' : i.stage === 'deployed' ? 'text-emerald-300' : 'text-cyan-300';
+    const stageLabel = isBlocked ? 'blocked / no patch' : (i.stage || '—');
+    return `<tr class="${isNew?'incident-new':''} hover:bg-slate-700/40 cursor-pointer border-b border-slate-800/60" onclick="openModal('${i.incident_id}')">
+      <td class="py-3 px-3 font-mono text-xs">${i.incident_id}${isNew?'<span class="new-badge">NEW</span>':''}</td>
       <td>${i.cwe_id?`<span class="font-mono text-cyan-300">${i.cwe_id}</span>`:'<span class="text-slate-500">—</span>'}</td>
       <td>${badge(i.severity)}</td>
       <td>${badge(i.risk)}</td>
-      <td><span class="text-cyan-300 text-xs font-semibold">${i.stage||'—'}</span></td>
+      <td><span class="${stageClass} text-xs font-semibold">${stageLabel}</span></td>
       <td class="text-xs font-mono text-slate-300">${i.branch||'—'}</td>
       <td class="text-xs text-slate-400">${t}</td>
     </tr>`;
@@ -1091,6 +1413,8 @@ async function initialLoad() {
     Q('#hdr-events').textContent    = STATE.events.length;
     renderIncidentTable();
     refreshEventLog();
+    rebuildCommandConsole();
+    refreshTargetStatus();
     if (tele) renderLlmTelemetry(tele);
   } catch (e) { console.warn('initial load failed', e); }
 }
@@ -1110,10 +1434,12 @@ function connect() {
       Q('#hdr-incidents').textContent = STATE.incidents.length;
       renderIncidentTable();
       refreshEventLog();
+      rebuildCommandConsole();
+      refreshTargetStatus();
       if (d.llm_telemetry) renderLlmTelemetry(d.llm_telemetry);
     } else if (d.type === 'event') {
       appendEvent(d.event);
-      react(d.event.channel, d.event.summary);
+      react(d.event.channel, d.event.summary, d.event.meta || {});
     } else if (d.type === 'incident_upsert') {
       upsertIncident(d.incident);
     } else if (d.type === 'llm_telemetry') {
@@ -1134,10 +1460,13 @@ setInterval(()=>{
 // Re-check OAuth/CLI availability periodically + when the tab regains focus,
 // so the header pill always reflects whether you can actually call the LLM right now.
 setInterval(()=>{ if (!document.hidden) refreshLlmStatus(); }, 20000);
+setInterval(()=>{ if (!document.hidden) refreshTargetStatus(); }, 8000);
 document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) refreshLlmStatus(); });
 
 initialLoad();
 refreshLlmStatus();
+refreshTargetStatus();
+renderCommandConsole();
 connect();
 </script>
 

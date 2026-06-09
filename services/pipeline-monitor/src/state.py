@@ -32,6 +32,11 @@ class PipelineState:
         self.incidents: dict[str, IncidentRecord] = {}
         self.totals_by_channel: Counter[str] = Counter()
 
+    def clear(self) -> None:
+        self.events.clear()
+        self.incidents.clear()
+        self.totals_by_channel.clear()
+
     def push_event(self, channel: str, payload: dict[str, Any]) -> dict[str, Any]:
         ts = time.time()
         self.totals_by_channel[channel] += 1
@@ -42,6 +47,7 @@ class PipelineState:
             "channel": channel,
             "incident_id": incident_id,
             "summary": self._summarize(channel, payload),
+            "meta": self._event_meta(channel, payload),
         }
         self.events.append(event)
 
@@ -57,6 +63,8 @@ class PipelineState:
         if channel == "elden:phase4:promote":
             p2 = payload.get("phase2") or {}
             return p2.get("event_id") or payload.get("incident_id")
+        if channel == "elden:phase4:deployed":
+            return payload.get("incident_id") or payload.get("event_id")
         if channel == "elden:phase2:retry":
             return payload.get("incident_id") or payload.get("event_id")
         return None
@@ -64,15 +72,65 @@ class PipelineState:
     def _summarize(self, channel: str, payload: dict[str, Any]) -> str:
         if channel == "elden:phase2:context":
             ai = payload.get("attack_info") or {}
+            metadata = payload.get("metadata") or {}
+            if ai.get("blocked") or metadata.get("requires_patch") is False:
+                return f"blocked {ai.get('category','?')} {ai.get('cwe_id','')}"
             return f"{ai.get('category','?')} {ai.get('cwe_id','')}"
         if channel == "elden:phase3:validate":
             return f"patch {payload.get('patch_id','?')} -> validate"
         if channel == "elden:phase4:promote":
             v = [payload.get(k, "?")[:1] for k in ("exploit", "regression", "slo")]
             return f"verdict E{v[0]}/R{v[1]}/S{v[2]}"
+        if channel == "elden:phase4:deployed":
+            status = payload.get("status", "?")
+            replay = (payload.get("checks") or {}).get("sqli_replay", "?")
+            return f"deploy {status} replay={replay}"
         if channel == "elden:phase2:retry":
             return f"retry: {payload.get('reason','?')}"
         return ""
+
+    def _event_meta(self, channel: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if channel == "elden:phase2:context":
+            ai = payload.get("attack_info") or {}
+            metadata = payload.get("metadata") or {}
+            return {
+                "blocked": ai.get("blocked"),
+                "requires_patch": metadata.get("requires_patch"),
+                "defense_action_taken": metadata.get("defense_action_taken"),
+            }
+        if channel == "elden:phase3:validate":
+            change = payload.get("change_summary") or {}
+            return {
+                "patch_id": payload.get("patch_id"),
+                "llm_provider": change.get("llm_provider"),
+                "security_fix": change.get("security_fix"),
+                "candidate_image": payload.get("candidate_image"),
+            }
+        if channel == "elden:phase4:promote":
+            phase2 = payload.get("phase2") or {}
+            change = phase2.get("change_summary") or {}
+            return {
+                "patch_id": phase2.get("patch_id"),
+                "llm_provider": change.get("llm_provider"),
+                "exploit": payload.get("exploit"),
+                "regression": payload.get("regression"),
+                "slo": payload.get("slo"),
+                "risk": payload.get("risk"),
+            }
+        if channel == "elden:phase4:deployed":
+            checks = payload.get("checks") or {}
+            return {
+                "deployment_ref": payload.get("deployment_ref"),
+                "valid_login": checks.get("valid_login"),
+                "sqli_replay": checks.get("sqli_replay"),
+                "attack_status": checks.get("attack_status"),
+            }
+        if channel == "elden:phase2:retry":
+            return {
+                "reason": payload.get("reason"),
+                "patch_id": payload.get("patch_id"),
+            }
+        return {}
 
     def _merge_into_incident(
         self, incident_id: str, channel: str, payload: dict[str, Any], ts: float
@@ -91,7 +149,12 @@ class PipelineState:
             rec.phase1 = payload
             rec.cwe_id = (payload.get("attack_info") or {}).get("cwe_id")
             rec.severity = (payload.get("metadata") or {}).get("severity")
-            rec.phase4_stage = "phase1_done"
+            ai = payload.get("attack_info") or {}
+            metadata = payload.get("metadata") or {}
+            if ai.get("blocked") or metadata.get("requires_patch") is False:
+                rec.phase4_stage = "blocked"
+            else:
+                rec.phase4_stage = "phase1_done"
         elif channel == "elden:phase3:validate":
             rec.phase2 = payload
             rec.candidate_image = payload.get("candidate_image")
@@ -106,6 +169,9 @@ class PipelineState:
             rec.risk = payload.get("risk") or rec.risk
             rec.branch = payload.get("branch") or rec.branch
             rec.phase4_stage = "phase3_done"
+        elif channel == "elden:phase4:deployed":
+            rec.phase4_stage = "deployed" if payload.get("status") == "success" else "deploy_failed"
+            rec.branch = payload.get("deployment_ref") or rec.branch
         elif channel == "elden:phase2:retry":
             rec.phase4_stage = "rejected"
 

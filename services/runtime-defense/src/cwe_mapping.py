@@ -12,6 +12,11 @@ CWE_MAP = {
         "cwe_name": "Improper Neutralization of Input During Web Page Generation",
         "owasp": "A03:2021",
     },
+    "Reflected XSS": {
+        "cwe_id": "CWE-79",
+        "cwe_name": "Improper Neutralization of Input During Web Page Generation",
+        "owasp": "A03:2021",
+    },
     "Path Traversal": {
         "cwe_id": "CWE-22",
         "cwe_name": "Improper Limitation of a Pathname to a Restricted Directory",
