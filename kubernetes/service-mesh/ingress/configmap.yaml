@@ -13,6 +13,9 @@ metadata:
   name: ingress-nginx-controller
   namespace: ingress-nginx
 data:
+  # nginx2root(CVE-2026-123007, CVE-2026-123633) 완화:
+  # 컨트롤러 내장 nginx가 1.31.9 / 1.30.7 이상이 되기 전까지 HTTP/2 비활성화 (ingress-nginx 기본값 true)
+  use-http2: "false"
   # ModSecurity WAF 활성화
   enable-modsecurity: "true"
   # OWASP Core Rule Set 활성화 (SQLi, XSS, Path Traversal 등 탐지)
